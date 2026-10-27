@@ -11,6 +11,9 @@ namespace SLiveTranslator.Translation;
 /// <summary>Tries each translator in order and moves on when one is blocked, over quota, or unreachable.</summary>
 public sealed class FallbackTranslator : ITranslator
 {
+    /// <summary>How often an identical failure is logged again when the service does not say how long it is paused.</summary>
+    static readonly TimeSpan RepeatLogInterval = TimeSpan.FromMinutes(1);
+
     readonly IReadOnlyList<ITranslator> _chain;
 
     public FallbackTranslator(string name, params ITranslator[] chain)
@@ -32,7 +35,9 @@ public sealed class FallbackTranslator : ITranslator
             }
             catch (Exception ex) when (!ct.IsCancellationRequested && ex is TranslatorUnavailableException or HttpRequestException or TaskCanceledException)
             {
-                Log.Write($"{translator.Name} unavailable: {ex.Message}");
+                // A paused service fails every line until the pause ends: one log line per pause is enough.
+                string line = $"{translator.Name} unavailable: {ex.Message}";
+                Log.Once(line, line, (ex as TranslatorUnavailableException)?.RetryAfter ?? RepeatLogInterval, LogLevel.Warn);
                 failures.Add(ex.Message);
             }
         }

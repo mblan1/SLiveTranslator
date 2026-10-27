@@ -17,7 +17,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Anthropic" Version="*" />
+    <PackageReference Include="Anthropic" Version="13.3.0" />
     <InternalsVisibleTo Include="SLiveTranslator.Tests" />
   </ItemGroup>
 

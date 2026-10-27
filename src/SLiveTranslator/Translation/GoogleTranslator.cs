@@ -82,7 +82,7 @@ public sealed class GoogleTranslator : ITranslator
     async Task<string> RequestAsync(string text, string sourceLang, string targetLang, CancellationToken ct)
     {
         if (DateTime.UtcNow < _blockedUntilUtc)
-            throw new TranslatorUnavailableException(BlockedMessage);
+            throw new TranslatorUnavailableException(BlockedMessage, _blockedUntilUtc - DateTime.UtcNow);
 
         using var form = new FormUrlEncodedContent(new Dictionary<string, string>
         {
@@ -101,7 +101,7 @@ public sealed class GoogleTranslator : ITranslator
         {
             _blocksInARow++;
             _blockedUntilUtc = DateTime.UtcNow + BlockPause;
-            throw new TranslatorUnavailableException(BlockedMessage);
+            throw new TranslatorUnavailableException(BlockedMessage, BlockPause);
         }
         response.EnsureSuccessStatusCode();
         _blocksInARow = 0;

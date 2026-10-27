@@ -25,6 +25,7 @@ namespace SLiveTranslator;
 
 public partial class App : Application
 {
+    readonly SettingsStore _store = new(DataPaths.Current.SettingsFile);
     AppSettings _settings = new();
     OverlayWindow? _overlay;
     SubtitlePresenter? _presenter;
@@ -45,18 +46,22 @@ public partial class App : Application
 
     void OnStartup(object sender, StartupEventArgs e)
     {
-        _settings = AppSettings.Load();
-        AppDomain.CurrentDomain.UnhandledException += (_, args) => Log.Write("unhandled: " + args.ExceptionObject);
+        AppDomain.CurrentDomain.UnhandledException += (_, args) => Log.Error("unhandled: " + args.ExceptionObject);
         DispatcherUnhandledException += (_, args) =>
         {
-            Log.Write("dispatcher: " + args.Exception);
+            Log.Error("dispatcher: " + args.Exception);
             args.Handled = true;
             ShowError(args.Exception.Message);
         };
+        _settings = _store.Load();
+        Log.Level = _settings.Storage.LogLevel;
+        Log.MaxBytes = Math.Max(64, _settings.Storage.LogMaxKB) * 1024L;
+        var problems = SettingsProblems();
 
         if (e.Args.Length > 0 && e.Args[0].StartsWith("--", StringComparison.Ordinal))
         {
             Native.AttachConsole(Native.ATTACH_PARENT_PROCESS);
+            foreach (var problem in problems) Console.Error.WriteLine(problem);
             _ = RunCliAsync(e.Args);
             return;
         }
@@ -71,16 +76,19 @@ public partial class App : Application
             return;
         }
 
-        BuildServices();
+        // Stores a version-1 file as schema 2 right away, so a plain-text API key gets encrypted (the original stays as .bak-v1).
+        if (_store.MigratedFromV1) TrySaveSettings();
+
+        problems.AddRange(BuildServices());
         _overlay = new OverlayWindow();
         _overlay.Show();
 
-        _presenter = new SubtitlePresenter(Dispatcher, _overlay, () => _subtitles?.Region ?? default, () => _settings.FontSize,
-            () => _settings.HotkeyHistory, ShowError,
-            notice => _overlay.ShowStatus($"{notice} Press {_settings.HotkeySelectRegion}.", StatusKind.Warning, _subtitles?.Region, 8));
+        _presenter = new SubtitlePresenter(Dispatcher, _overlay, () => _subtitles?.Region ?? default, () => _settings.Overlay.FontSize,
+            () => Hotkey(HotkeyAction.History), ShowError,
+            notice => _overlay.ShowStatus($"{notice} Press {Hotkey(HotkeyAction.SelectRegion)}.", StatusKind.Warning, _subtitles?.Region, 8));
         _screenTranslator = new ScreenTranslator(() => _ocr!, () => _translator!, Langs);
         _subtitles = new SubtitleWatcher(() => _ocr!, () => _translator!,
-            () => (Langs().Src, Langs().Tgt, _settings.SubtitleIntervalMs), _presenter);
+            () => (Langs().Src, Langs().Tgt, _settings.Subtitles.IntervalMs), _presenter);
 
         _clearTimer = new DispatcherTimer();
         _clearTimer.Tick += (_, _) =>
@@ -93,42 +101,90 @@ public partial class App : Application
         _saveTimer.Start();
 
         CreateTray();
-        RegisterHotkeys();
+        if (RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
 
-        if (!_settings.FirstRunDone)
+        // One toast holds every startup problem (a later toast would replace an earlier one), shown before the
+        // first-run settings window so a reset to defaults is explained before the user saves over it.
+        if (problems.Count > 0)
+            _overlay.ShowStatus(string.Join("\n", problems), StatusKind.Warning, Forms.Screen.PrimaryScreen?.Bounds, 12);
+        if (!_settings.General.FirstRunDone)
         {
             ShowSettings();
+            return;
         }
-        else
-        {
-            string keys = $"{_settings.HotkeyToggleSubtitles}: subtitles   {_settings.HotkeyTranslateScreen}: translate screen   {_settings.HotkeyHistory}: history";
-            Balloon("SLiveTranslator is running", keys);
+        string keys = $"{Hotkey(HotkeyAction.ToggleSubtitles)}: subtitles   {Hotkey(HotkeyAction.TranslateScreen)}: translate screen   {Hotkey(HotkeyAction.History)}: history";
+        Balloon("SLiveTranslator is running", keys);
+        if (problems.Count == 0)
             _overlay.ShowStatus("SLiveTranslator ready  ·  " + keys, StatusKind.Info, Forms.Screen.PrimaryScreen?.Bounds, 5);
-        }
     }
 
-    (string Src, string Tgt) Langs() =>
-        (LangCodes.FromOcrTag(_ocr?.LanguageTag), string.IsNullOrWhiteSpace(_settings.TargetLanguage) ? "en" : _settings.TargetLanguage);
+    /// <summary>Problems with the data folder or settings.json found while loading; logged here, shown once the overlay is up.</summary>
+    List<string> SettingsProblems()
+    {
+        var problems = new List<string>();
+        if (DataPaths.Current.UnavailableLocation is { } missing)
+            problems.Add($"The data folder {missing} is not available, so the default folder {DataPaths.Current.Root} is in use. Connect the drive and restart SLiveTranslator.");
+        if (_settings.IsNewerSchema)
+            problems.Add($"settings.json comes from a newer SLiveTranslator (schema {_settings.SchemaVersion}): the settings this version does not know are kept but not used.");
+        foreach (var problem in problems) Log.Warn("startup: " + problem);
+        if (_store.LoadProblem is { } loadProblem) problems.Add(loadProblem); // the store logged it
+        return problems;
+    }
 
-    void BuildServices()
+    string Hotkey(HotkeyAction action) => _settings.Hotkeys[action];
+
+    (string Src, string Tgt) Langs() =>
+        (LangCodes.FromOcrTag(_ocr?.LanguageTag), string.IsNullOrWhiteSpace(_settings.General.TargetLanguage) ? "en" : _settings.General.TargetLanguage);
+
+    void TrySaveSettings()
     {
         try
         {
-            _ocr = WindowsOcrEngine.Create(_settings.OcrLanguage);
+            _store.Save(_settings);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ShowError("Settings could not be saved: " + ex.Message);
+        }
+    }
+
+    /// <returns>Problems for the user, already logged. The caller shows them: at startup the overlay does not exist yet.</returns>
+    List<string> BuildServices()
+    {
+        var problems = new List<string>();
+        try
+        {
+            _ocr = WindowsOcrEngine.Create(_settings.General.OcrLanguage);
         }
         catch (Exception ex)
         {
             _ocr = null;
-            Log.Write("ocr init: " + ex);
-            ShowError(ex.Message);
+            Log.Error("ocr init: " + ex);
+            problems.Add(ex.Message);
         }
 
-        ITranslator inner = _settings.Provider == "claude"
-            ? new ClaudeTranslator(_settings.ClaudeApiKey, _settings.ClaudeModel)
+        var translation = _settings.Translation;
+        ITranslator inner;
+        if (translation.Provider == ProviderIds.Claude && !translation.Claude.ApiKeyUnreadable)
+        {
+            inner = new ClaudeTranslator(translation.Claude.ApiKey, translation.Claude.Model);
+        }
+        else
+        {
+            // An undecryptable key must not reach the SDK as "": it would fall back to ANTHROPIC_API_KEY or an
+            // "ant auth login" profile, which may bill someone else.
+            if (translation.Provider == ProviderIds.Claude)
+            {
+                const string message = "The saved Claude API key cannot be decrypted on this Windows account. Enter it again in Settings; the free services are used until then.";
+                Log.Error(message);
+                problems.Add(message);
+            }
             // "free-mt": cache entries made before MyMemory preferred machine translation held junk corpus matches.
-            : new FallbackTranslator("free-mt", new GoogleTranslator(), new MyMemoryTranslator(_settings.MyMemoryEmail));
+            inner = new FallbackTranslator("free-mt", new GoogleTranslator(), new MyMemoryTranslator(translation.Free.MyMemoryEmail));
+        }
         _translator?.Save();
-        _translator = new CachedTranslator(inner, Path.Combine(AppSettings.Dir, "cache.json"));
+        _translator = new CachedTranslator(inner, DataPaths.Current.CacheFile);
+        return problems;
     }
 
     bool IsOwnWindow(IntPtr hwnd) =>
@@ -153,8 +209,8 @@ public partial class App : Application
         menu.Items.Add("Settings…", null, (_, _) => ShowSettings());
         menu.Items.Add("Open data folder", null, (_, _) =>
         {
-            Directory.CreateDirectory(AppSettings.Dir);
-            Process.Start("explorer.exe", AppSettings.Dir);
+            Directory.CreateDirectory(DataPaths.Current.Root);
+            Process.Start("explorer.exe", DataPaths.Current.Root);
         });
         menu.Items.Add("Exit", null, (_, _) => Shutdown());
 
@@ -168,22 +224,26 @@ public partial class App : Application
         _tray.DoubleClick += (_, _) => ShowSettings();
     }
 
-    void RegisterHotkeys()
+    /// <returns>A problem to show the user, or null when every enabled hotkey is registered.</returns>
+    string? RegisterHotkeys()
     {
         _hotkeys ??= new HotkeyManager();
         _hotkeys.UnregisterAll();
         var failed = new List<string>();
-        void Register(string hotkey, Action action)
+        void Register(HotkeyAction hotkey, Action action)
         {
-            if (!_hotkeys.Register(hotkey, action)) failed.Add(hotkey);
+            if (_settings.Hotkeys.Disabled.Contains(hotkey)) return;
+            if (!_hotkeys.Register(Hotkey(hotkey), action)) failed.Add(Hotkey(hotkey));
         }
-        Register(_settings.HotkeyTranslateScreen, TranslateScreen);
-        Register(_settings.HotkeyToggleSubtitles, ToggleSubtitles);
-        Register(_settings.HotkeySelectRegion, () => SelectRegion());
-        Register(_settings.HotkeyClear, ClearOverlay);
-        Register(_settings.HotkeyHistory, ToggleHistory);
-        if (failed.Count > 0)
-            ShowError("Could not register hotkeys: " + string.Join(", ", failed) + ". Another program uses them; change them in Settings.");
+        Register(HotkeyAction.TranslateScreen, TranslateScreen);
+        Register(HotkeyAction.ToggleSubtitles, ToggleSubtitles);
+        Register(HotkeyAction.SelectRegion, () => SelectRegion());
+        Register(HotkeyAction.Clear, ClearOverlay);
+        Register(HotkeyAction.History, ToggleHistory);
+        if (failed.Count == 0) return null;
+        string problem = "Could not register hotkeys: " + string.Join(", ", failed) + ". Another program uses them; change them in Settings.";
+        Log.Error(problem);
+        return problem;
     }
 
     async void TranslateScreen()
@@ -209,7 +269,7 @@ public partial class App : Application
             }
 
             void Draw(IReadOnlyList<ScreenTranslator.Item> items) =>
-                _overlay.ShowLabels(items.Select(i => (i.Source.Bounds, i.Translated, i.Source.LineCount)), area, _settings.FontSize);
+                _overlay.ShowLabels(items.Select(i => (i.Source.Bounds, i.Translated, i.Source.LineCount)), area, _settings.Overlay.FontSize);
 
             // Text nearest the mouse (the hovered item) is translated first and shown as soon as it is ready.
             var result = await _screenTranslator.TranslateAsync(area, cts.Token, area.Contains(mouse) ? mouse : null,
@@ -230,7 +290,7 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            Log.Write("translate screen: " + ex);
+            Log.Error("translate screen: " + ex);
             ShowError(ex.Message);
         }
     }
@@ -239,8 +299,8 @@ public partial class App : Application
     {
         if (_clearTimer is null) return;
         _clearTimer.Stop();
-        if (_settings.ScreenOverlaySeconds <= 0) return;
-        _clearTimer.Interval = TimeSpan.FromSeconds(_settings.ScreenOverlaySeconds);
+        if (_settings.Overlay.LabelSeconds <= 0) return;
+        _clearTimer.Interval = TimeSpan.FromSeconds(_settings.Overlay.LabelSeconds);
         _clearTimer.Start();
     }
 
@@ -258,15 +318,15 @@ public partial class App : Application
             ShowError("OCR is not available.");
             return;
         }
-        if (_settings.SubtitleRegion is null && SelectRegion() is null) return;
+        if (_settings.Subtitles.Region is null && SelectRegion() is null) return;
 
-        var region = _settings.SubtitleRegion!.ToRectangle();
+        var region = _settings.Subtitles.Region!.ToRectangle();
         _presenter!.Start();
         _subtitles.Start(region);
         _overlay.ShowLiveBadge(region, "Subtitles on");
         SetLive(true);
         if (!WarnIfLargeRegion(region))
-            _overlay.ShowStatus($"Subtitles ON  ·  {_settings.HotkeyToggleSubtitles} to stop  ·  {_settings.HotkeyHistory} for history",
+            _overlay.ShowStatus($"Subtitles ON  ·  {Hotkey(HotkeyAction.ToggleSubtitles)} to stop  ·  {Hotkey(HotkeyAction.History)} for history",
                 StatusKind.On, region, 3);
     }
 
@@ -292,7 +352,7 @@ public partial class App : Application
     {
         var screen = Forms.Screen.FromRectangle(region).Bounds;
         if ((double)region.Width * region.Height <= 0.35 * screen.Width * screen.Height) return false;
-        _overlay?.ShowStatus($"Subtitle region is almost the whole screen: slow and misses lines. Press {_settings.HotkeySelectRegion} and select only the subtitle strip.",
+        _overlay?.ShowStatus($"Subtitle region is almost the whole screen: slow and misses lines. Press {Hotkey(HotkeyAction.SelectRegion)} and select only the subtitle strip.",
             StatusKind.Warning, region, 8);
         return true;
     }
@@ -315,8 +375,8 @@ public partial class App : Application
             if (wasRunning) ToggleSubtitles();
             return null;
         }
-        _settings.SubtitleRegion = RegionSettings.From(rect);
-        _settings.Save();
+        _settings.Subtitles.Region = RegionSettings.From(rect);
+        TrySaveSettings();
         if (!WarnIfLargeRegion(rect)) _overlay?.ShowStatus("Subtitle region saved", StatusKind.Info, rect);
         if (wasRunning) ToggleSubtitles();
         return rect;
@@ -341,21 +401,23 @@ public partial class App : Application
             open.Activate();
             return;
         }
-        var dialog = new SettingsWindow(_settings, SelectRegion);
+        var dialog = new SettingsWindow(_settings, SelectRegion, () => _store.Save(_settings));
         if (dialog.ShowDialog() != true) return;
 
         bool restart = _subtitles?.IsRunning == true;
         StopSubtitles();
-        BuildServices();
-        RegisterHotkeys();
+        var problems = BuildServices();
+        if (RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
         if (restart) ToggleSubtitles();
-        else _overlay?.ShowStatus("Settings saved", StatusKind.Info, Forms.Screen.PrimaryScreen?.Bounds);
+        if (problems.Count > 0) _overlay?.ShowStatus(string.Join("\n", problems), StatusKind.Warning, Forms.Screen.PrimaryScreen?.Bounds, 12);
+        else if (!restart) _overlay?.ShowStatus("Settings saved", StatusKind.Info, Forms.Screen.PrimaryScreen?.Bounds);
     }
 
     /// <summary>Errors go to the in-game overlay: Windows suppresses tray notifications while a game is in front.</summary>
     void ShowError(string message)
     {
-        Log.Write("error: " + message);
+        // A failure that repeats on every subtitle line (both free services paused) would otherwise fill the log.
+        Log.Once("shown: " + message, message, TimeSpan.FromMinutes(1), LogLevel.Error);
         if (message == _lastError && DateTime.UtcNow - _lastErrorAt < TimeSpan.FromSeconds(10)) return;
         _lastError = message;
         _lastErrorAt = DateTime.UtcNow;
@@ -391,7 +453,7 @@ public partial class App : Application
         int code = 1;
         try
         {
-            string outDir = args.Length > 1 ? args[1] : AppSettings.Dir;
+            string outDir = args.Length > 1 ? args[1] : DataPaths.Current.Root;
             switch (args[0])
             {
                 case "--selftest":
@@ -408,7 +470,7 @@ public partial class App : Application
         catch (Exception ex)
         {
             Console.Error.WriteLine(ex);
-            Log.Write("cli: " + ex);
+            Log.Error("cli: " + ex);
         }
         Shutdown(code);
     }
@@ -465,7 +527,7 @@ public partial class App : Application
     async Task<int> TranslateScreenCliAsync(string outDir)
     {
         Directory.CreateDirectory(outDir);
-        BuildServices();
+        foreach (var problem in BuildServices()) Console.Error.WriteLine(problem);
         if (_ocr is null || _translator is null) return 2;
 
         var translator = new ScreenTranslator(() => _ocr, () => _translator, Langs);

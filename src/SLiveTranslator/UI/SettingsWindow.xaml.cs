@@ -12,18 +12,22 @@ public partial class SettingsWindow : Window
 {
     readonly AppSettings _settings;
     readonly Func<DRect?> _selectRegion;
+    readonly Action _save;
+    bool _claudeKeyEdited;
 
     sealed record LanguageItem(string Tag, string Label)
     {
         public override string ToString() => Label;
     }
 
-    public SettingsWindow(AppSettings settings, Func<DRect?> selectRegion)
+    public SettingsWindow(AppSettings settings, Func<DRect?> selectRegion, Action save)
     {
         InitializeComponent();
         _settings = settings;
         _selectRegion = selectRegion;
+        _save = save;
         Populate();
+        ClaudeKey.PasswordChanged += (_, _) => _claudeKeyEdited = true;
     }
 
     void Populate()
@@ -31,28 +35,31 @@ public partial class SettingsWindow : Window
         OcrLang.Items.Add(new LanguageItem("", "Windows default (user profile languages)"));
         foreach (var (tag, name) in WindowsOcrEngine.AvailableLanguages())
             OcrLang.Items.Add(new LanguageItem(tag, $"{name} ({tag})"));
-        OcrLang.SelectedItem = OcrLang.Items.OfType<LanguageItem>().FirstOrDefault(i => i.Tag == _settings.OcrLanguage) ?? OcrLang.Items[0];
+        OcrLang.SelectedItem = OcrLang.Items.OfType<LanguageItem>().FirstOrDefault(i => i.Tag == _settings.General.OcrLanguage) ?? OcrLang.Items[0];
 
         foreach (var code in LangCodes.CommonTargets) TargetLang.Items.Add(code);
-        TargetLang.Text = _settings.TargetLanguage;
+        TargetLang.Text = _settings.General.TargetLanguage;
 
-        Provider.SelectedIndex = _settings.Provider == "claude" ? 1 : 0;
-        MyMemoryEmail.Text = _settings.MyMemoryEmail;
-        ClaudeKey.Password = _settings.ClaudeApiKey;
-        ClaudeModel.Text = _settings.ClaudeModel;
-        Interval.Text = _settings.SubtitleIntervalMs.ToString();
-        FontSizeBox.Text = _settings.FontSize.ToString();
-        OverlaySeconds.Text = _settings.ScreenOverlaySeconds.ToString();
-        HkScreen.Text = _settings.HotkeyTranslateScreen;
-        HkSubtitles.Text = _settings.HotkeyToggleSubtitles;
-        HkRegion.Text = _settings.HotkeySelectRegion;
-        HkClear.Text = _settings.HotkeyClear;
-        HkHistory.Text = _settings.HotkeyHistory;
+        var translation = _settings.Translation;
+        Provider.SelectedIndex = translation.Provider == ProviderIds.Claude ? 1 : 0;
+        MyMemoryEmail.Text = translation.Free.MyMemoryEmail;
+        ClaudeKey.Password = translation.Claude.ApiKey;
+        if (translation.Claude.ApiKeyUnreadable)
+            ClaudeKey.ToolTip = "The saved key cannot be decrypted on this Windows account. Enter it again, or leave the box empty to remove it.";
+        ClaudeModel.Text = translation.Claude.Model;
+        Interval.Text = _settings.Subtitles.IntervalMs.ToString();
+        FontSizeBox.Text = _settings.Overlay.FontSize.ToString();
+        OverlaySeconds.Text = _settings.Overlay.LabelSeconds.ToString();
+        HkScreen.Text = _settings.Hotkeys[HotkeyAction.TranslateScreen];
+        HkSubtitles.Text = _settings.Hotkeys[HotkeyAction.ToggleSubtitles];
+        HkRegion.Text = _settings.Hotkeys[HotkeyAction.SelectRegion];
+        HkClear.Text = _settings.Hotkeys[HotkeyAction.Clear];
+        HkHistory.Text = _settings.Hotkeys[HotkeyAction.History];
         ShowRegion();
     }
 
     void ShowRegion() =>
-        RegionText.Text = _settings.SubtitleRegion is { } r ? $"{r.Width} × {r.Height} px at ({r.X}, {r.Y})" : "not set";
+        RegionText.Text = _settings.Subtitles.Region is { } r ? $"{r.Width} × {r.Height} px at ({r.X}, {r.Y})" : "not set";
 
     void OnSelectRegion(object sender, RoutedEventArgs e)
     {
@@ -64,7 +71,7 @@ public partial class SettingsWindow : Window
         {
             if (_selectRegion() is { } rect)
             {
-                _settings.SubtitleRegion = RegionSettings.From(rect);
+                _settings.Subtitles.Region = RegionSettings.From(rect);
                 ShowRegion();
             }
         }
@@ -78,32 +85,41 @@ public partial class SettingsWindow : Window
 
     void OnSave(object sender, RoutedEventArgs e)
     {
+        if (TryApply()) DialogResult = true;
+    }
+
+    /// <summary>Copies the form into the settings and saves them; false when a value is invalid (the user was told).</summary>
+    internal bool TryApply()
+    {
         foreach (var hotkey in new[] { HkScreen.Text, HkSubtitles.Text, HkRegion.Text, HkClear.Text, HkHistory.Text })
         {
             if (!HotkeyManager.TryParse(hotkey, out _, out _))
             {
                 MessageBox.Show(this, $"\"{hotkey}\" is not a valid hotkey. Use the form Ctrl+Shift+T.", "SLiveTranslator", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
+                return false;
             }
         }
 
-        _settings.OcrLanguage = (OcrLang.SelectedItem as LanguageItem)?.Tag ?? "";
-        _settings.TargetLanguage = string.IsNullOrWhiteSpace(TargetLang.Text) ? "en" : TargetLang.Text.Trim();
-        _settings.Provider = Provider.SelectedIndex == 1 ? "claude" : "free";
-        _settings.MyMemoryEmail = MyMemoryEmail.Text.Trim();
-        _settings.ClaudeApiKey = ClaudeKey.Password.Trim();
-        _settings.ClaudeModel = ClaudeModel.Text.Trim();
-        _settings.SubtitleIntervalMs = ParseInt(Interval.Text, 300, 100, 5000);
-        _settings.FontSize = ParseInt(FontSizeBox.Text, 22, 10, 80);
-        _settings.ScreenOverlaySeconds = ParseInt(OverlaySeconds.Text, 12, 0, 300);
-        _settings.HotkeyTranslateScreen = HkScreen.Text.Trim();
-        _settings.HotkeyToggleSubtitles = HkSubtitles.Text.Trim();
-        _settings.HotkeySelectRegion = HkRegion.Text.Trim();
-        _settings.HotkeyClear = HkClear.Text.Trim();
-        _settings.HotkeyHistory = HkHistory.Text.Trim();
-        _settings.FirstRunDone = true;
-        _settings.Save();
-        DialogResult = true;
+        _settings.General.OcrLanguage = (OcrLang.SelectedItem as LanguageItem)?.Tag ?? "";
+        _settings.General.TargetLanguage = string.IsNullOrWhiteSpace(TargetLang.Text) ? "en" : TargetLang.Text.Trim();
+        var translation = _settings.Translation;
+        translation.Provider = Provider.SelectedIndex == 1 ? ProviderIds.Claude : ProviderIds.Free;
+        translation.Free.MyMemoryEmail = MyMemoryEmail.Text.Trim();
+        // Only an edited key is stored: a key this Windows account cannot decrypt shows as empty and survives an
+        // unrelated save, while emptying the box on purpose removes it.
+        if (_claudeKeyEdited) translation.Claude.ApiKey = ClaudeKey.Password;
+        translation.Claude.Model = ClaudeModel.Text.Trim();
+        _settings.Subtitles.IntervalMs = ParseInt(Interval.Text, 300, 100, 5000);
+        _settings.Overlay.FontSize = ParseInt(FontSizeBox.Text, 22, 10, 80);
+        _settings.Overlay.LabelSeconds = ParseInt(OverlaySeconds.Text, 12, 0, 300);
+        _settings.Hotkeys[HotkeyAction.TranslateScreen] = HkScreen.Text.Trim();
+        _settings.Hotkeys[HotkeyAction.ToggleSubtitles] = HkSubtitles.Text.Trim();
+        _settings.Hotkeys[HotkeyAction.SelectRegion] = HkRegion.Text.Trim();
+        _settings.Hotkeys[HotkeyAction.Clear] = HkClear.Text.Trim();
+        _settings.Hotkeys[HotkeyAction.History] = HkHistory.Text.Trim();
+        _settings.General.FirstRunDone = true;
+        _save();
+        return true;
     }
 
     static int ParseInt(string text, int fallback, int min, int max) =>

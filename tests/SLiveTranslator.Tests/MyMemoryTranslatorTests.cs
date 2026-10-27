@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Net.Http;
 using System.Text;
@@ -39,7 +40,8 @@ public class MyMemoryTranslatorTests
             """{"responseData":{"translatedText":"MYMEMORY WARNING: YOU USED ALL AVAILABLE FREE TRANSLATIONS FOR TODAY."},"quotaFinished":true,"responseStatus":429}"""));
         var translator = new MyMemoryTranslator(null, new HttpClient(handler));
 
-        await Assert.ThrowsAsync<TranslatorUnavailableException>(() => translator.TranslateAsync(["x"], "en", "vi", CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<TranslatorUnavailableException>(() => translator.TranslateAsync(["x"], "en", "vi", CancellationToken.None));
+        Assert.Equal(TimeSpan.FromHours(1), ex.RetryAfter);
     }
 
     [Fact]
@@ -63,6 +65,7 @@ public class MyMemoryTranslatorTests
     [Trait("Category", "Network")]
     public async Task Translates_from_english_live()
     {
+        if (!TestEnvironment.LiveTestsEnabled) return; // calls the real MyMemory API, whose free daily quota the app shares
         var translator = new MyMemoryTranslator();
         var result = await translator.TranslateAsync(["Health Potion"], "en", "vi", CancellationToken.None);
 

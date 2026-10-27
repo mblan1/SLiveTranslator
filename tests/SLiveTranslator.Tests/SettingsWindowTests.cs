@@ -1,0 +1,70 @@
+using System;
+using System.Runtime.ExceptionServices;
+using System.Threading;
+using SLiveTranslator.Models;
+using SLiveTranslator.UI;
+using Xunit;
+
+namespace SLiveTranslator.Tests;
+
+public class SettingsWindowTests
+{
+    /// <summary>A key blob from another Windows account: it shows as an empty box.</summary>
+    const string ForeignBlob = "AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAAdamaged";
+
+    static void OnStaThread(Action test)
+    {
+        ExceptionDispatchInfo? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                test();
+            }
+            catch (Exception ex)
+            {
+                failure = ExceptionDispatchInfo.Capture(ex);
+            }
+        });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        failure?.Throw();
+    }
+
+    [Fact]
+    public void Undecryptable_key_survives_an_unrelated_save_and_an_emptied_box_removes_it() => OnStaThread(() =>
+    {
+        var settings = new AppSettings();
+        settings.Translation.Provider = ProviderIds.Claude;
+        settings.Translation.Claude.ApiKeyProtected = ForeignBlob;
+        int saves = 0;
+        var window = new SettingsWindow(settings, () => null, () => saves++);
+
+        Assert.Equal("", window.ClaudeKey.Password);
+        Assert.True(window.TryApply());
+        Assert.Equal(ForeignBlob, settings.Translation.Claude.ApiKeyProtected);
+
+        window.ClaudeKey.Password = "x";
+        window.ClaudeKey.Password = "";
+        Assert.True(window.TryApply());
+        Assert.Equal("", settings.Translation.Claude.ApiKeyProtected);
+        Assert.False(settings.Translation.Claude.ApiKeyUnreadable);
+        Assert.Equal(2, saves);
+        window.Close();
+    });
+
+    [Fact]
+    public void Typed_key_replaces_the_stored_one() => OnStaThread(() =>
+    {
+        var settings = new AppSettings();
+        settings.Translation.Claude.ApiKeyProtected = ForeignBlob;
+        var window = new SettingsWindow(settings, () => null, () => { });
+
+        window.ClaudeKey.Password = "  sk-ant-typed  ";
+        Assert.True(window.TryApply());
+
+        Assert.Equal("sk-ant-typed", settings.Translation.Claude.ApiKey);
+        window.Close();
+    });
+}

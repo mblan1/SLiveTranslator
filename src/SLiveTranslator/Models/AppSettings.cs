@@ -1,64 +1,110 @@
-using System;
+using System.Collections.Generic;
 using System.Globalization;
-using System.IO;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace SLiveTranslator.Models;
 
-public sealed class AppSettings
+/// <summary>Keeps fields this version does not know, so a file written by a newer version survives a save.</summary>
+public abstract class SettingsSection
 {
-    /// <summary>BCP-47 tag of the Windows OCR language ("" = Windows user-profile languages).</summary>
-    public string OcrLanguage { get; set; } = "";
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Unknown { get; set; }
+}
 
+/// <summary>Everything in settings.json (schema 2). Loaded and saved by <see cref="SettingsStore"/>.</summary>
+public sealed class AppSettings : SettingsSection
+{
+    public int SchemaVersion { get; set; } = SettingsStore.CurrentSchemaVersion;
+    public GeneralSettings General { get; set; } = new();
+    public TranslationSettings Translation { get; set; } = new();
+    public SubtitleSettings Subtitles { get; set; } = new();
+    public OverlaySettings Overlay { get; set; } = new();
+    public HotkeySettings Hotkeys { get; set; } = new();
+    public NotificationSettings Notifications { get; set; } = new();
+    public StorageSettings Storage { get; set; } = new();
+    public UiSettings Ui { get; set; } = new();
+
+    /// <summary>The file came from a newer version of the app; saving keeps its schema number and unknown fields.</summary>
+    [JsonIgnore]
+    public bool IsNewerSchema => SchemaVersion > SettingsStore.CurrentSchemaVersion;
+}
+
+public enum AppTheme { System, Light, Dark }
+
+public sealed class GeneralSettings : SettingsSection
+{
     /// <summary>Language to translate into (Google code such as "en", "vi", "ja", "zh-CN").</summary>
     public string TargetLanguage { get; set; } = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
 
-    /// <summary>"free" (Google, then MyMemory; no key) or "claude" (needs an API key). Older files may say "google", which means "free".</summary>
-    public string Provider { get; set; } = "free";
+    /// <summary>BCP-47 tag of the Windows OCR language ("" = Windows user-profile languages).</summary>
+    public string OcrLanguage { get; set; } = "";
 
-    /// <summary>Optional; raises the MyMemory free limit from 5,000 to 50,000 characters per day.</summary>
-    public string MyMemoryEmail { get; set; } = "";
-    public string ClaudeApiKey { get; set; } = "";
-    public string ClaudeModel { get; set; } = "claude-opus-5-5";
-
-    public int SubtitleIntervalMs { get; set; } = 300;
-    public RegionSettings? SubtitleRegion { get; set; }
-    public int FontSize { get; set; } = 22;
-
-    /// <summary>Seconds the screen-translation labels stay visible (0 = until cleared).</summary>
-    public int ScreenOverlaySeconds { get; set; } = 12;
-
-    public string HotkeyTranslateScreen { get; set; } = "Ctrl+Shift+T";
-    public string HotkeyToggleSubtitles { get; set; } = "Ctrl+Shift+S";
-    public string HotkeySelectRegion { get; set; } = "Ctrl+Shift+R";
-    public string HotkeyClear { get; set; } = "Ctrl+Shift+X";
-    public string HotkeyHistory { get; set; } = "Ctrl+Shift+H";
-
+    public AppTheme Theme { get; set; } = AppTheme.System;
+    public bool StartWithWindows { get; set; }
     public bool FirstRunDone { get; set; }
+}
 
-    public static string Dir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SLiveTranslator");
-    static string FilePath => Path.Combine(Dir, "settings.json");
-    static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+public enum OcrMode { Auto, Mask, Plain }
 
-    public static AppSettings Load()
-    {
-        try
-        {
-            if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(FilePath), JsonOptions) ?? new AppSettings();
-        }
-        catch (Exception ex)
-        {
-            Log.Write("settings load failed: " + ex.Message);
-        }
-        return new AppSettings();
-    }
+public sealed class SubtitleSettings : SettingsSection
+{
+    public int IntervalMs { get; set; } = 300;
+    public RegionSettings? Region { get; set; }
+    public bool PauseWhenGameUnfocused { get; set; } = true;
+    public OcrMode OcrMode { get; set; } = OcrMode.Auto;
 
-    public void Save()
-    {
-        Directory.CreateDirectory(Dir);
-        File.WriteAllText(FilePath, JsonSerializer.Serialize(this, JsonOptions));
-    }
+    /// <summary>Runs the subtitle loop at below-normal priority.</summary>
+    public bool LowImpact { get; set; }
+}
+
+public enum SubtitlePosition { BelowRegion, AboveRegion, BottomCenter }
+
+public sealed class OverlaySettings : SettingsSection
+{
+    public int FontSize { get; set; } = 22;
+    public int MaxLines { get; set; } = 3;
+    public double TextOpacity { get; set; } = 1.0;
+    public double BackgroundOpacity { get; set; } = 0.82;
+    public SubtitlePosition Position { get; set; } = SubtitlePosition.BelowRegion;
+    public bool ShowOriginal { get; set; }
+    public int HistoryLines { get; set; } = 12;
+
+    /// <summary>Seconds the translate-screen labels stay visible (0 = until cleared).</summary>
+    public int LabelSeconds { get; set; } = 12;
+}
+
+public enum NoticePosition { TopCenter, TopRight, NearRegion }
+
+public sealed class NoticeCategorySettings : SettingsSection
+{
+    public bool Enabled { get; set; } = true;
+    public double Seconds { get; set; } = 2.5;
+}
+
+public sealed class NotificationSettings : SettingsSection
+{
+    public NoticeCategorySettings Status { get; set; } = new();
+    public NoticeCategorySettings Warning { get; set; } = new() { Seconds = 8 };
+    public NoticeCategorySettings Error { get; set; } = new() { Seconds = 6 };
+    public NoticeCategorySettings Quota { get; set; } = new() { Seconds = 8 };
+    public NoticePosition Position { get; set; } = NoticePosition.TopCenter;
+    public bool Sound { get; set; }
+    public bool TrayBalloons { get; set; } = true;
+    public bool LiveBadge { get; set; } = true;
+}
+
+public sealed class StorageSettings : SettingsSection
+{
+    public int CacheMaxEntries { get; set; } = 20_000;
+    public LogLevel LogLevel { get; set; } = LogLevel.Info;
+    public int LogMaxKB { get; set; } = (int)(LogWriter.DefaultMaxBytes / 1024);
+}
+
+public sealed class UiSettings : SettingsSection
+{
+    /// <summary>"en" or "vi"; "" follows the Windows display language.</summary>
+    public string Language { get; set; } = "";
 }
 
 public sealed record RegionSettings(int X, int Y, int Width, int Height)

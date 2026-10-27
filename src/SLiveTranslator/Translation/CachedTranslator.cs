@@ -30,7 +30,7 @@ public sealed class CachedTranslator : ITranslator
         }
         catch (Exception ex)
         {
-            Log.Write("cache load failed: " + ex.Message);
+            Log.Error("cache load failed: " + ex.Message);
         }
     }
 
@@ -70,7 +70,7 @@ public sealed class CachedTranslator : ITranslator
         }
         catch (Exception ex)
         {
-            Log.Write("cache save failed: " + ex.Message);
+            Log.Error("cache save failed: " + ex.Message);
         }
     }
 

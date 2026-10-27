@@ -133,7 +133,7 @@ public sealed class SubtitleWatcher : IDisposable
             catch (Exception ex)
             {
                 failures++;
-                Log.Write("subtitle loop: " + ex.Message);
+                Log.Warn("subtitle loop: " + ex.Message);
                 _sink.Error(ex.Message);
             }
 
@@ -196,7 +196,9 @@ public sealed class SubtitleWatcher : IDisposable
         }
         catch (Exception ex)
         {
-            Log.Write("subtitle translate: " + ex.Message);
+            // The same failure repeats on every line while a service is paused: one log line a minute is enough.
+            string line = "subtitle translate: " + ex.Message;
+            Log.Once(line, line, TimeSpan.FromMinutes(1), LogLevel.Warn);
             if (IsCurrent(id, version)) _sink.LineFailed(id, text, ex.Message);
         }
     }

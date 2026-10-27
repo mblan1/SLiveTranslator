@@ -82,4 +82,18 @@ public class GoogleTranslatorTests
 
         Assert.Single(handler.Bodies);
     }
+
+    [Fact]
+    public async Task Rate_limit_reports_the_remaining_pause_with_an_unchanged_message()
+    {
+        var handler = new FakeHandler((_, _) => new HttpResponseMessage(HttpStatusCode.TooManyRequests));
+        var translator = new GoogleTranslator(new HttpClient(handler));
+
+        var first = await Assert.ThrowsAsync<TranslatorUnavailableException>(() => translator.TranslateAsync(["a"], "en", "vi", CancellationToken.None));
+        var second = await Assert.ThrowsAsync<TranslatorUnavailableException>(() => translator.TranslateAsync(["b"], "en", "vi", CancellationToken.None));
+
+        Assert.Equal(TimeSpan.FromMinutes(10), first.RetryAfter);
+        Assert.InRange(second.RetryAfter!.Value, TimeSpan.FromMinutes(9), TimeSpan.FromMinutes(10));
+        Assert.Equal(first.Message, second.Message); // one Log.Once key for the whole pause
+    }
 }

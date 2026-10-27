@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using SLiveTranslator.Models;
 using SLiveTranslator.Translation;
 using Xunit;
 
@@ -57,5 +59,26 @@ public class FallbackTranslatorTests
             new Stub("mymemory", texts => texts));
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => chain.TranslateAsync(["x"], "en", "vi", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task A_paused_service_is_logged_once_per_pause()
+    {
+        string reason = "paused for the test " + Guid.NewGuid().ToString("N");
+        var blocked = new Stub("google", _ => throw new TranslatorUnavailableException(reason, TimeSpan.FromMinutes(10)));
+        var chain = new FallbackTranslator("free", blocked, new Stub("mymemory", texts => texts));
+
+        for (int i = 0; i < 5; i++) await chain.TranslateAsync(["line " + i], "en", "vi", CancellationToken.None);
+
+        Assert.Equal(5, blocked.Calls);
+        Assert.Single(ReadLog(), line => line.Contains(reason));
+    }
+
+    /// <summary>The shared test-run log; other tests may be appending to it at the same time.</summary>
+    static string[] ReadLog()
+    {
+        using var stream = new FileStream(Log.FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd().Split('\n');
     }
 }

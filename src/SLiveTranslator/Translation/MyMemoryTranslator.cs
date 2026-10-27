@@ -66,7 +66,7 @@ public sealed class MyMemoryTranslator : ITranslator
     async Task<string> RequestAsync(string text, string sourceLang, string targetLang, CancellationToken ct)
     {
         if (DateTime.UtcNow < _blockedUntilUtc)
-            throw new TranslatorUnavailableException(QuotaMessage);
+            throw new TranslatorUnavailableException(QuotaMessage, _blockedUntilUtc - DateTime.UtcNow);
 
         string source = sourceLang == "auto" ? "Autodetect" : sourceLang;
         var url = Endpoint + "?q=" + Uri.EscapeDataString(text)
@@ -116,7 +116,7 @@ public sealed class MyMemoryTranslator : ITranslator
     Exception Blocked()
     {
         _blockedUntilUtc = DateTime.UtcNow + QuotaPause;
-        return new TranslatorUnavailableException(QuotaMessage);
+        return new TranslatorUnavailableException(QuotaMessage, QuotaPause);
     }
 
     string QuotaMessage => _email is null

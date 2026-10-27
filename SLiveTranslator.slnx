@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SLiveTranslator/SLiveTranslator.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SLiveTranslator.Tests/SLiveTranslator.Tests.csproj" />
+  </Folder>
+</Solution>

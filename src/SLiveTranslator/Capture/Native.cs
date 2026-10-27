@@ -1,0 +1,42 @@
+using System;
+using System.Drawing;
+using System.Runtime.InteropServices;
+
+namespace SLiveTranslator.Capture;
+
+internal static class Native
+{
+    public const int GWL_EXSTYLE = -20;
+    public const long WS_EX_TRANSPARENT = 0x20;
+    public const long WS_EX_TOOLWINDOW = 0x80;
+    public const long WS_EX_LAYERED = 0x80000;
+    public const long WS_EX_NOACTIVATE = 0x08000000;
+
+    public const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
+
+    public static readonly IntPtr HWND_TOPMOST = new(-1);
+    public const uint SWP_NOACTIVATE = 0x10;
+    public const uint SWP_SHOWWINDOW = 0x40;
+
+    public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
+    public const int WM_HOTKEY = 0x0312;
+    public const uint MOD_ALT = 1, MOD_CONTROL = 2, MOD_SHIFT = 4, MOD_WIN = 8, MOD_NOREPEAT = 0x4000;
+    public const int ATTACH_PARENT_PROCESS = -1;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT
+    {
+        public int Left, Top, Right, Bottom;
+        public readonly Rectangle ToRectangle() => Rectangle.FromLTRB(Left, Top, Right, Bottom);
+    }
+
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr GetWindowLongPtrW(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr SetWindowLongPtrW(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool UnregisterHotKey(IntPtr hWnd, int id);
+    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int attr, out RECT rect, int size);
+    [DllImport("kernel32.dll")] public static extern bool AttachConsole(int processId);
+}

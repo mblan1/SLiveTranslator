@@ -18,12 +18,15 @@ public sealed class ScreenTranslator
     readonly Func<IOcrEngine> _ocr;
     readonly Func<ITranslator> _translator;
     readonly Func<(string Src, string Tgt)> _langs;
+    readonly Func<GameProfile?> _profile;
 
-    public ScreenTranslator(Func<IOcrEngine> ocr, Func<ITranslator> translator, Func<(string Src, string Tgt)> langs)
+    /// <param name="profile">The game profile for the game in front; no context is sent, the screen is no conversation.</param>
+    public ScreenTranslator(Func<IOcrEngine> ocr, Func<ITranslator> translator, Func<(string Src, string Tgt)> langs, Func<GameProfile?>? profile = null)
     {
         _ocr = ocr;
         _translator = translator;
         _langs = langs;
+        _profile = profile ?? (() => null);
     }
 
     /// <param name="Source">Recognized text; Bounds are absolute screen pixels.</param>
@@ -50,6 +53,7 @@ public sealed class ScreenTranslator
         if (focus is { } f) paragraphs = paragraphs.OrderBy(p => DistanceSquared(p.Bounds, f)).ToList();
 
         var (src, tgt) = _langs();
+        var profile = _profile();
         var done = new List<Item>(paragraphs.Count);
         using var gate = new SemaphoreSlim(ParallelChunks);
         await Task.WhenAll(Chunks(paragraphs).Select(async chunk =>
@@ -57,7 +61,8 @@ public sealed class ScreenTranslator
             await gate.WaitAsync(ct);
             try
             {
-                var translated = await _translator().TranslateAsync(chunk.Select(p => p.Text).ToList(), src, tgt, ct);
+                var request = new TranslateRequest(chunk.Select(p => p.Text).ToList(), src, tgt, Array.Empty<ContextLine>(), profile);
+                var translated = (await _translator().TranslateAsync(request, ct)).Texts;
                 IReadOnlyList<Item> snapshot;
                 lock (done)
                 {

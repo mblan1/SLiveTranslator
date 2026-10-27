@@ -1,5 +1,6 @@
 using System;
 using System.Net;
+using SLiveTranslator.Models;
 using SLiveTranslator.Translation;
 using Xunit;
 
@@ -7,16 +8,18 @@ namespace SLiveTranslator.Tests;
 
 public class FreeServicesTests
 {
+    // The free services moved from FreeServices into ProviderRegistry, which builds every chain.
+
     [Fact]
     public void Google_and_myMemory_live_as_long_as_the_app()
     {
         // A settings save builds the chain again; Google must still know that this network is blocked.
-        var free = new FreeServices();
+        var free = new ProviderRegistry();
         var google = free.Google;
         var myMemory = free.MyMemory("");
 
-        free.Chain("");
-        free.Chain(" ");
+        free.Build(new TranslationSettings());
+        free.Build(new TranslationSettings { Free = { MyMemoryEmail = " " } });
 
         Assert.Same(google, free.Google);
         Assert.Same(myMemory, free.MyMemory(""));
@@ -25,7 +28,7 @@ public class FreeServicesTests
     [Fact]
     public void A_new_email_gets_a_new_myMemory_with_its_own_quota()
     {
-        var free = new FreeServices();
+        var free = new ProviderRegistry();
         var anonymous = free.MyMemory("");
 
         var withEmail = free.MyMemory("player@example.com");

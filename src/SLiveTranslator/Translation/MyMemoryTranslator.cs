@@ -17,6 +17,12 @@ namespace SLiveTranslator.Translation;
 /// </summary>
 public sealed class MyMemoryTranslator : ITranslator
 {
+    /// <summary><see cref="TranslateResult.AnsweredBy"/> of a line from MyMemory's machine translation.</summary>
+    public const string AnsweredByMachine = "mymemory-mt";
+
+    /// <summary>A line from MyMemory's crowd-sourced corpus (translation memory): often an unrelated film line, never cached.</summary>
+    public const string AnsweredByCorpus = "mymemory-tm";
+
     const string Endpoint = "https://api.mymemory.translated.net/get";
     const int MaxBytesPerRequest = 480; // the API rejects queries over 500 bytes
     static readonly TimeSpan QuotaPause = TimeSpan.FromHours(1);
@@ -24,19 +30,34 @@ public sealed class MyMemoryTranslator : ITranslator
 
     readonly HttpClient _http;
     readonly string? _email;
+    readonly DailyCharCounter? _usage;
     DateTime _blockedUntilUtc = DateTime.MinValue;
 
-    public MyMemoryTranslator(string? email = null, HttpClient? http = null)
+    /// <param name="usage">Counts the characters sent today; the instances made for other emails share it.</param>
+    public MyMemoryTranslator(string? email = null, HttpClient? http = null, DailyCharCounter? usage = null)
     {
         _email = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
         _http = http ?? DefaultHttp;
+        _usage = usage;
     }
 
     public string Name => "mymemory";
 
-    public async Task<IReadOnlyList<string>> TranslateAsync(IReadOnlyList<string> texts, string sourceLang, string targetLang, CancellationToken ct)
+    /// <summary>Characters sent today, as counted on this PC; 0 without a counter.</summary>
+    public long CharsToday => _usage?.Today ?? 0;
+
+    /// <summary>The free characters per day: 50,000 with an email, 5,000 without.</summary>
+    public int DailyLimit => _email is null ? 5_000 : 50_000;
+
+    public async Task<IReadOnlyList<string>> TranslateAsync(IReadOnlyList<string> texts, string sourceLang, string targetLang, CancellationToken ct) =>
+        (await TranslateAsync(TranslateRequest.Plain(texts, sourceLang, targetLang), ct)).Texts;
+
+    /// <summary>Each line is answered by the machine translation or by the corpus; <see cref="TranslateResult.LineAnsweredBy"/> tells which.</summary>
+    public async Task<TranslateResult> TranslateAsync(TranslateRequest request, CancellationToken ct)
     {
+        var texts = request.Lines;
         var results = new string[texts.Count];
+        var answeredBy = new string[texts.Count];
         using var gate = new SemaphoreSlim(4);
         await Task.WhenAll(texts.Select(async (text, i) =>
         {
@@ -44,19 +65,27 @@ public sealed class MyMemoryTranslator : ITranslator
             try
             {
                 var parts = new List<string>();
+                bool machine = true;
                 foreach (var piece in SplitByBytes(text, MaxBytesPerRequest))
-                    parts.Add(await RequestAsync(piece, sourceLang, targetLang, ct));
+                {
+                    var (translated, byMachine) = await RequestAsync(piece, request.Src, request.Tgt, ct);
+                    parts.Add(translated);
+                    machine &= byMachine;
+                }
                 results[i] = string.Join(" ", parts);
+                answeredBy[i] = machine ? AnsweredByMachine : AnsweredByCorpus;
             }
             finally
             {
                 gate.Release();
             }
         }));
-        return results;
+        string all = answeredBy.All(a => a == AnsweredByMachine) ? AnsweredByMachine : AnsweredByCorpus;
+        return new TranslateResult(results, null, all) { LineAnsweredBy = answeredBy };
     }
 
-    async Task<string> RequestAsync(string text, string sourceLang, string targetLang, CancellationToken ct)
+    /// <returns>The translation, and whether it is MyMemory's machine translation rather than a corpus match.</returns>
+    async Task<(string Text, bool Machine)> RequestAsync(string text, string sourceLang, string targetLang, CancellationToken ct)
     {
         if (DateTime.UtcNow < _blockedUntilUtc)
             throw new TranslatorUnavailableException(QuotaMessage, _blockedUntilUtc - DateTime.UtcNow);
@@ -87,7 +116,24 @@ public sealed class MyMemoryTranslator : ITranslator
             string details = root.TryGetProperty("responseDetails", out var d) ? d.GetString() ?? "" : "";
             throw new InvalidOperationException("MyMemory: " + (details.Length > 0 ? details : "HTTP status " + status));
         }
-        return WebUtility.HtmlDecode(MachineTranslation(root) ?? translated);
+        _usage?.Add(text.Length);
+        if (MachineTranslation(root) is { } machine) return (WebUtility.HtmlDecode(machine), true);
+        translated = WebUtility.HtmlDecode(translated);
+        // A subtitle corpus starts every line of a dialog with "- ": a match that adds one is another film's line. It
+        // is rejected and the source comes back untranslated (never cached), so a later try can still translate it.
+        return AddsDialogDash(text, translated) ? (text, false) : (translated, false);
+    }
+
+    /// <summary>The translation starts with a dialog dash ("- ", "– ") that the source does not have.</summary>
+    internal static bool AddsDialogDash(string source, string translated)
+    {
+        static bool Dashed(string s)
+        {
+            s = s.TrimStart();
+            return s.Length > 1 && s[0] is '-' or '–' or '—' && char.IsWhiteSpace(s[1]);
+        }
+        static bool StartsWithDash(string s) => s.TrimStart() is { Length: > 0 } t && t[0] is '-' or '–' or '—';
+        return Dashed(translated) && !StartsWithDash(source);
     }
 
     /// <summary>

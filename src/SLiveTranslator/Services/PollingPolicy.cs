@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using SLiveTranslator.Capture;
 
@@ -23,6 +24,9 @@ internal interface IWindowProbe
 
     /// <summary>The process of the desktop and taskbar (explorer.exe).</summary>
     int ShellProcessId();
+
+    /// <summary>The executable name without ".exe" ("witcher3"); null when the process is gone or cannot be read.</summary>
+    string? ProcessName(int processId);
 }
 
 /// <summary>A window of the game and its process.</summary>
@@ -34,7 +38,8 @@ internal sealed record GameWindow(IntPtr Handle, int ProcessId);
 /// when subtitles started: that may be the tray menu, a dialog that just closed, a browser on the other monitor or a
 /// launcher. A game not known yet (nothing but the desktop showed the region) is the first program in front that shows
 /// it; one that was closed is looked for again the same way, so a restarted game is found. While the game is not
-/// known, subtitles never pause.
+/// known, subtitles never pause. The game is found the same way when subtitles never pause, since its process picks
+/// the game profile.
 /// </summary>
 internal sealed class PollingPolicy
 {
@@ -63,7 +68,6 @@ internal sealed class PollingPolicy
     /// </summary>
     public bool GameAway(bool pauseWhenUnfocused)
     {
-        if (!pauseWhenUnfocused) return false;
         if (Game is { } closed && !_probe.Exists(closed.Handle)) Game = null;
         var (window, processId) = _probe.Foreground();
         if (Game is not { } game)
@@ -71,6 +75,7 @@ internal sealed class PollingPolicy
             if (IsOtherProgram(processId) && _probe.At(_regionCentre).Window == window) Game = new GameWindow(window, processId);
             return false;
         }
+        if (!pauseWhenUnfocused) return false;
         return (processId != 0 && processId != game.ProcessId) || _probe.IsMinimized(window) || _probe.IsMinimized(game.Handle);
     }
 
@@ -107,6 +112,20 @@ internal sealed class SystemWindowProbe : IWindowProbe
     public bool Exists(IntPtr window) => window != IntPtr.Zero && Native.IsWindow(window);
 
     public int ShellProcessId() => ProcessOf(Native.GetShellWindow());
+
+    public string? ProcessName(int processId)
+    {
+        if (processId == 0) return null;
+        try
+        {
+            using var process = Process.GetProcessById(processId);
+            return process.ProcessName;
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return null; // the process ended
+        }
+    }
 
     static int ProcessOf(IntPtr window)
     {

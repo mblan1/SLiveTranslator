@@ -1,4 +1,6 @@
 using System;
+using System.Net.Http;
+using System.Threading.Tasks;
 
 namespace SLiveTranslator.Translation;
 
@@ -7,4 +9,10 @@ namespace SLiveTranslator.Translation;
 public sealed class TranslatorUnavailableException(string message, TimeSpan? retryAfter = null) : Exception(message)
 {
     public TimeSpan? RetryAfter { get; } = retryAfter;
+
+    /// <summary>
+    /// The service cannot answer now (refused, paused, unreachable, timed out), as opposed to a request no service can
+    /// answer (a bad language code): another service, or an earlier answer, may stand in.
+    /// </summary>
+    public static bool IsServiceFailure(Exception ex) => ex is TranslatorUnavailableException or HttpRequestException or TaskCanceledException;
 }

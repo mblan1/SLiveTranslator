@@ -21,10 +21,13 @@ public class CachedTranslatorTests
     static Task<IReadOnlyList<string>> Translate(CachedTranslator cache, params string[] texts) =>
         cache.TranslateAsync(texts, "en", "vi", CancellationToken.None);
 
-    static List<string> FileKeys(TempDir dir)
+    /// <summary>The entries of the saved file (version 2) as "provider|src|tgt|text", in file order.</summary>
+    internal static List<string> FileKeys(TempDir dir)
     {
         using var doc = JsonDocument.Parse(File.ReadAllText(dir.File("cache.json")));
-        return doc.RootElement.EnumerateObject().Select(p => p.Name).ToList();
+        return doc.RootElement.GetProperty("entries").EnumerateArray()
+            .Select(e => $"{e.GetProperty("p").GetString()}|{e.GetProperty("s").GetString()}|{e.GetProperty("t").GetString()}|{e.GetProperty("src").GetString()}")
+            .ToList();
     }
 
     [Fact]

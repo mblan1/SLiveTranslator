@@ -42,6 +42,9 @@ public sealed class DataPaths
     public string LogFile => Path.Combine(Root, "log.txt");
     public string ProfilesDir => Path.Combine(Root, "Profiles");
 
+    /// <summary>The characters sent to MyMemory today (its free quota is per day).</summary>
+    public string MyMemoryUsageFile => Path.Combine(Root, "mymemory-usage.json");
+
     static DataPaths Resolve() =>
         Resolve(Path.GetDirectoryName(Environment.ProcessPath), Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData));
 

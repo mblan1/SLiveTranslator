@@ -266,9 +266,10 @@ public static class TextUtil
     static readonly HashSet<string> RealWords = new(StringComparer.OrdinalIgnoreCase)
     {
         "its", "hell", "held", "shell", "shed", "well", "were", "wed", "weld", "lets", "whore", "howls",
+        "annals", "vests", // names of the Witcher profile (Anna, Ves) with "ls" / "ts"
     };
 
-    sealed record NamePattern(string Key, Regex Pattern);
+    sealed record NamePattern(IEnumerable<string> Names, string Key, Regex Pattern);
     static NamePattern? _namePossessive; // the last list used; names change only with the game profile
 
     /// <summary>
@@ -286,18 +287,21 @@ public static class TextUtil
         text = MisreadIm.Replace(text, "I'm");
         text = LeadingMisreadI.Replace(text, m => "I'" + m.Groups[1].Value);
         if (NamePossessive(names) is { } possessive)
-            text = possessive.Replace(text, m => m.Groups[1].Value + "'s");
+            text = possessive.Replace(text, m => RealWords.Contains(m.Value) ? m.Value : m.Groups[1].Value + "'s");
         return text;
     }
 
     static Regex? NamePossessive(IEnumerable<string>? names)
     {
-        var list = names?.Where(n => n.Length > 1).OrderByDescending(n => n.Length).Select(Regex.Escape).ToList();
-        if (list is null || list.Count == 0) return null;
+        if (names is null) return null;
+        // The game profile passes the same list for every reading: no need to look at its contents again.
+        if (_namePossessive is { } same && ReferenceEquals(same.Names, names)) return same.Pattern;
+        var list = names.Where(n => n.Length > 1).OrderByDescending(n => n.Length).Select(Regex.Escape).ToList();
+        if (list.Count == 0) return null;
         string key = string.Join("|", list);
-        if (_namePossessive is { } cached && cached.Key == key) return cached.Pattern;
-        var pattern = new Regex($@"\b({key})[l1|!t]s\b(?!-)", RegexOptions.CultureInvariant);
-        _namePossessive = new NamePattern(key, pattern);
+        var pattern = _namePossessive is { } cached && cached.Key == key ? cached.Pattern
+            : new Regex($@"\b({key})[l1|!t]s\b(?!-)", RegexOptions.CultureInvariant);
+        _namePossessive = new NamePattern(names, key, pattern);
         return pattern;
     }
 

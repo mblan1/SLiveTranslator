@@ -160,7 +160,7 @@ internal static class SubtitleReplay
             lock (_gate) _notices.Add(message);
         }
 
-        public void LineTranslated(int id, string translated, bool lowConfidence) { }
+        public void LineTranslated(int id, string translated, bool lowConfidence, string provider) { }
         public void LineFailed(int id, string original, string error) { }
         public void Cleared() { }
         public void Paused(bool paused) { }

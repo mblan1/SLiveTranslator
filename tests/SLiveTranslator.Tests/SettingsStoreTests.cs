@@ -247,7 +247,7 @@ public class SettingsStoreTests
         using var dir = new TempDir();
         var store = new SettingsStore(dir.File("settings.json"));
         var s = new AppSettings();
-        s.Translation.ActiveProfile = "Thợ săn quái vật";
+        s.Translation.ProfileId = "Thợ săn quái vật";
 
         store.Save(s);
         string saved = File.ReadAllText(store.FilePath);

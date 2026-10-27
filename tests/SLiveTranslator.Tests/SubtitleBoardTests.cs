@@ -113,4 +113,32 @@ public class SubtitleBoardTests
         Assert.Equal(2, board.Visible(2).Count);
         Assert.Equal(["Line 4.", "Line 5.", "Line 6.", "Line 7.", "Line 8."], board.History(12).Select(h => h.Original));
     }
+
+    [Fact]
+    public void Lines_expose_their_source_translation_and_provider_for_a_hand_fix()
+    {
+        var board = new SubtitleBoard();
+        board.Detected(1, "Roach!", false);
+        board.Translated(1, "Cá viền đỏ!", false, 3, "free-mt");
+        board.Detected(2, "Where is the griffin?", false);
+
+        Assert.Equal([new SubtitleRecord(1, "Roach!", "Cá viền đỏ!", "free-mt"), new SubtitleRecord(2, "Where is the griffin?", null, null)], board.Records(12));
+    }
+
+    [Fact]
+    public void A_hand_fix_shows_on_every_line_with_that_source()
+    {
+        var board = new SubtitleBoard();
+        board.Detected(1, "Roach!", true);
+        board.Translated(1, "Cá viền đỏ!", true, 3, "free-mt");
+        board.Detected(2, "Where is she?", false);
+        board.Detected(3, "Roach!", false);
+        board.Failed(3);
+
+        Assert.True(board.Fix("Roach!", "Roach!"));
+
+        Assert.Equal([new SubtitleLineView("Roach!", false), new SubtitleLineView("…", true), new SubtitleLineView("Roach!", false)], board.Visible(3));
+        Assert.Equal(["user", null, "user"], board.Records(12).Select(r => r.Provider));
+        Assert.False(board.Fix("Not shown.", "x"));
+    }
 }

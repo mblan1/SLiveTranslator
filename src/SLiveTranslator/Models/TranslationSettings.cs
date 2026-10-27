@@ -25,7 +25,9 @@ public sealed class TranslationSettings : SettingsSection
 
     public bool UseContext { get; set; } = true;
     public int ContextLines { get; set; } = 6;
-    public string ActiveProfile { get; set; } = "witcher3";
+
+    /// <summary>The game profile: "" picks it by the game's process, "none" translates without one, anything else is a profile id.</summary>
+    public string ProfileId { get; set; } = "";
 
     public FreeProviderSettings Free { get; set; } = new();
     public ClaudeProviderSettings Claude { get; set; } = new();

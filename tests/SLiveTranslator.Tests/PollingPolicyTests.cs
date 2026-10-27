@@ -33,6 +33,7 @@ public class PollingPolicyTests
         public bool IsMinimized(IntPtr window) => Minimized.Contains(window);
         public bool Exists(IntPtr window) => !Closed.Contains(window);
         public int ShellProcessId() => Shell;
+        public string? ProcessName(int processId) => processId == Game ? "witcher3" : null;
     }
 
     static PollingPolicy Policy(FakeProbe probe, GameWindow? known = null) => new(probe, Own, Region, known);
@@ -164,6 +165,21 @@ public class PollingPolicyTests
         probe.InFront = (BrowserWindow, Browser);
 
         Assert.False(policy.GameAway(false));
+    }
+
+    [Fact]
+    public void With_pausing_off_the_game_is_still_found_since_its_process_picks_the_profile()
+    {
+        var probe = new FakeProbe { AtRegion = (Desktop, Shell), InFront = (BrowserWindow, Browser) };
+        var policy = Policy(probe);
+        Assert.Null(policy.Game);
+
+        probe.AtRegion = probe.InFront = (GameWindow, Game); // the game started
+        Assert.False(policy.GameAway(false));
+
+        Assert.Equal(new GameWindow(GameWindow, Game), policy.Game);
+        probe.InFront = (BrowserWindow, Browser);
+        Assert.False(policy.GameAway(false)); // and subtitles still never pause
     }
 
     [Fact]

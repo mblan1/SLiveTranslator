@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Windows.Threading;
 using SLiveTranslator.Services;
 using SLiveTranslator.UI.Overlay;
@@ -82,6 +83,18 @@ public sealed class SubtitlePresenter : ISubtitleSink
         _overlay.HideHistory();
     }
 
+    /// <summary>The latest lines with their source and provider, for the history list (any thread).</summary>
+    public IReadOnlyList<SubtitleRecord> Records(int lines) => _ui.Invoke(() => _board.Records(lines));
+
+    /// <summary>
+    /// Shows the user's fix on every line with this source text. The caller stores it in the cache first
+    /// (<see cref="Translation.CachedTranslator.SetUserOverride"/>), so the line keeps it when it comes again.
+    /// </summary>
+    public void ApplyFix(string source, string translation) => _ui.BeginInvoke(() =>
+    {
+        if (_board.Fix(source, translation)) Render();
+    });
+
     // ---- ISubtitleSink ----
 
     public void LineDetected(int id, string original, bool lowConfidence) => _ui.BeginInvoke(() =>
@@ -92,10 +105,10 @@ public sealed class SubtitlePresenter : ISubtitleSink
         Render();
     });
 
-    public void LineTranslated(int id, string translated, bool lowConfidence) => _ui.BeginInvoke(() =>
+    public void LineTranslated(int id, string translated, bool lowConfidence, string provider) => _ui.BeginInvoke(() =>
     {
         // A translation that arrives after the box was hidden brings the box back for another linger.
-        if (_board.Translated(id, translated, lowConfidence, VisibleLines) && !_live) RestartLinger();
+        if (_board.Translated(id, translated, lowConfidence, VisibleLines, provider) && !_live) RestartLinger();
         Render();
     });
 

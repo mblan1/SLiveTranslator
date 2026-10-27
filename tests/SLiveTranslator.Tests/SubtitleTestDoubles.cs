@@ -19,6 +19,7 @@ sealed class RecordingSink : ISubtitleSink
     readonly object _gate = new();
     readonly List<object> _events = new();
     readonly List<bool> _translatedLowConfidence = new();
+    readonly List<string> _providers = new();
 
     public List<object> Events
     {
@@ -40,11 +41,18 @@ sealed class RecordingSink : ISubtitleSink
     }
 
     public void LineDetected(int id, string original, bool lowConfidence) => Add(new Detected(id, original, lowConfidence));
-    public void LineTranslated(int id, string translated, bool lowConfidence)
+    /// <summary>The provider key of each translation, in order.</summary>
+    public List<string> Providers
+    {
+        get { lock (_gate) return _providers.ToList(); }
+    }
+
+    public void LineTranslated(int id, string translated, bool lowConfidence, string provider)
     {
         lock (_gate)
         {
             _translatedLowConfidence.Add(lowConfidence);
+            _providers.Add(provider);
             _events.Add(("translated", id, translated));
         }
     }

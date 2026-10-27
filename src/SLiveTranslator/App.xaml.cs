@@ -35,7 +35,8 @@ public partial class App : Application
     HotkeyManager? _hotkeys;
     IOcrEngine? _ocr;
     CachedTranslator? _translator;
-    readonly FreeServices _free = new();
+    readonly ProviderRegistry _providers = new(DataPaths.Current.CacheFile, new DailyCharCounter(DataPaths.Current.MyMemoryUsageFile));
+    readonly GameProfileStore _profiles = new(DataPaths.Current.ProfilesDir);
     SubtitleWatcher? _subtitles;
     ScreenTranslator? _screenTranslator;
     CancellationTokenSource? _screenCts;
@@ -80,14 +81,16 @@ public partial class App : Application
         if (_store.MigratedFromV1) TrySaveSettings();
 
         problems.AddRange(BuildServices());
+        problems.AddRange(_profiles.Problems);
         _overlay = new OverlayHost();
+        _providers.ServiceSwitched += OnServiceSwitched;
 
         _presenter = new SubtitlePresenter(Dispatcher, _overlay, () => _subtitles?.Region ?? default, () => _settings.Overlay.FontSize,
             () => _settings.Overlay.MaxLines, () => Hotkey(HotkeyAction.History), ShowError,
             notice => _overlay.ShowStatus($"{notice} Press {Hotkey(HotkeyAction.SelectRegion)}.", StatusKind.Warning, _subtitles?.Region, 8),
             ShowLiveBadge);
-        _screenTranslator = new ScreenTranslator(() => _ocr!, () => _translator!, Langs);
-        _subtitles = new SubtitleWatcher(() => _ocr!, () => _translator!, SubtitleConfig, _presenter);
+        _screenTranslator = new ScreenTranslator(() => _ocr!, () => _translator!, Langs, ForegroundProfile);
+        _subtitles = new SubtitleWatcher(() => _ocr!, () => _translator!, SubtitleConfig, _presenter) { Profiles = ProfileFor };
 
         _clearTimer = new DispatcherTimer();
         _clearTimer.Tick += (_, _) =>
@@ -136,13 +139,25 @@ public partial class App : Application
     {
         var (src, tgt) = Langs();
         var subtitles = _settings.Subtitles;
+        var translation = _settings.Translation;
         return new WatcherConfig(src, tgt, subtitles.IntervalMs, subtitles.ParagraphGapRatio)
         {
             OcrMode = subtitles.OcrMode,
             PauseWhenGameUnfocused = subtitles.PauseWhenGameUnfocused,
             LowImpact = subtitles.LowImpact,
+            ContextLines = translation.UseContext ? Math.Clamp(translation.ContextLines, 0, ContextWindow.MaxLines) : 0,
         };
     }
+
+    /// <summary>The game profile the settings ask for, for the game with this process name (null when not known).</summary>
+    GameProfile? ProfileFor(string? processName)
+    {
+        var (src, tgt) = Langs();
+        return _profiles.Resolve(_settings.Translation.ProfileId, processName, src, tgt);
+    }
+
+    /// <summary>The profile for the program in front: translate-screen reads the game the hotkey was pressed in.</summary>
+    GameProfile? ForegroundProfile() => ProfileFor(SystemWindowProbe.Instance.ProcessName(SystemWindowProbe.Instance.Foreground().ProcessId));
 
     void TrySaveSettings()
     {
@@ -171,36 +186,23 @@ public partial class App : Application
             problems.Add(ex.Message);
         }
 
-        var translation = _settings.Translation;
-        ITranslator inner;
-        if (translation.Provider == ProviderIds.Claude && !translation.Claude.ApiKeyUnreadable)
-        {
-            inner = new ClaudeTranslator(translation.Claude.ApiKey, translation.Claude.Model);
-        }
-        else
-        {
-            // An undecryptable key must not reach the SDK as "": it would fall back to ANTHROPIC_API_KEY or an
-            // "ant auth login" profile, which may bill someone else.
-            if (translation.Provider == ProviderIds.Claude)
-            {
-                const string message = "The saved Claude API key cannot be decrypted on this Windows account. Enter it again in Settings; the free services are used until then.";
-                Log.Error(message);
-                problems.Add(message);
-            }
-            inner = _free.Chain(translation.Free.MyMemoryEmail);
-        }
-        // One cache for the whole run: it is loaded once, and a settings save only changes what answers a miss.
-        int maxEntries = Math.Max(100, _settings.Storage.CacheMaxEntries);
-        if (_translator is null)
-        {
-            _translator = new CachedTranslator(inner, DataPaths.Current.CacheFile, maxEntries);
-        }
-        else
-        {
-            _translator.Inner = inner;
-            _translator.MaxEntries = maxEntries;
-        }
+        // The selected provider, then the free services (alone while its key is missing), behind the one cache of the run.
+        var notice = _providers.Apply(_settings).Notice;
+        if (notice is not null) problems.Add(notice); // the registry logged it
+        _translator = _providers.Cache;
         return problems;
+    }
+
+    /// <summary>
+    /// The provider the user selected stopped answering and the free services translate instead: said once per switch,
+    /// so a paid provider out of credit is not replaced unnoticed. The free services' own switch (Google blocked, so
+    /// MyMemory) and the way back are only logged.
+    /// </summary>
+    void OnServiceSwitched(object? sender, ServiceSwitch e)
+    {
+        if (e.Reason.Length == 0 || e.From != _translator?.Name) return;
+        Dispatcher.BeginInvoke(() => _overlay?.ShowStatus($"{e.From} is not answering, so the free services translate for now. {e.Reason}",
+            StatusKind.Warning, _subtitles?.Region, 8));
     }
 
     bool IsOwnWindow(IntPtr hwnd) =>
@@ -467,7 +469,7 @@ public partial class App : Application
     void OnExit(object sender, ExitEventArgs e)
     {
         _subtitles?.Dispose();
-        _translator?.Flush();
+        _providers.Flush();
         _hotkeys?.Dispose();
         if (_tray is not null)
         {
@@ -515,7 +517,7 @@ public partial class App : Application
         foreach (var problem in BuildServices()) Console.Error.WriteLine(problem);
         if (_ocr is null || _translator is null) return 2;
 
-        var translator = new ScreenTranslator(() => _ocr, () => _translator, Langs);
+        var translator = new ScreenTranslator(() => _ocr, () => _translator, Langs, ForegroundProfile);
         var area = Forms.Screen.PrimaryScreen!.Bounds;
         var watch = Stopwatch.StartNew();
         var items = await translator.TranslateAsync(area, CancellationToken.None);
@@ -545,7 +547,7 @@ public partial class App : Application
             }
         }
         shot.Save(Path.Combine(outDir, "translate_screen.png"), Drawing.Imaging.ImageFormat.Png);
-        _translator.Flush();
+        _providers.Flush();
         return 0;
     }
 }

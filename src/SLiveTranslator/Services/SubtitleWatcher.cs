@@ -24,7 +24,8 @@ public interface ISubtitleSink
     /// A translation of the line. It may be of an earlier reading when the line grew meanwhile (shown until the
     /// newer one arrives); <paramref name="lowConfidence"/> belongs to the reading that was translated.
     /// </summary>
-    void LineTranslated(int id, string translated, bool lowConfidence);
+    /// <param name="provider">The provider key the translation came from (<see cref="ProviderKeys"/>); "user" for a hand fix.</param>
+    void LineTranslated(int id, string translated, bool lowConfidence, string provider);
     /// <summary>Translating the line failed; it is retried once, so a translation may still follow.</summary>
     void LineFailed(int id, string original, string error);
     /// <summary>The game's subtitle disappeared.</summary>
@@ -49,6 +50,9 @@ public sealed record WatcherConfig(string Src, string Tgt, int IntervalMs, doubl
 
     /// <summary>Run at below-normal priority while subtitles are on; read at start.</summary>
     public bool LowImpact { get; init; }
+
+    /// <summary>Earlier lines sent along with each new one (<see cref="TranslationSettings.ContextLines"/>); 0 sends none.</summary>
+    public int ContextLines { get; init; } = 6;
 }
 
 /// <summary>
@@ -78,9 +82,11 @@ public sealed class SubtitleWatcher : IDisposable
     readonly ISubtitleSink _sink;
     readonly SemaphoreSlim _translateGate = new(MaxParallelTranslations);
     readonly ConcurrentDictionary<int, LineState> _lines = new();
+    readonly ContextWindow _context = new();
     CancellationTokenSource? _cts;
     LowPriorityScope? _lowPriority;
     PollingPolicy? _polling;
+    (int Id, string? Name) _gameProcess;
     int _session;
 
     public SubtitleWatcher(Func<IOcrEngine> ocr, Func<ITranslator> translator, Func<WatcherConfig> config, ISubtitleSink sink)
@@ -102,6 +108,19 @@ public sealed class SubtitleWatcher : IDisposable
     /// <summary>Tells which window is in front, for <see cref="WatcherConfig.PauseWhenGameUnfocused"/>.</summary>
     internal IWindowProbe Windows { get; init; } = SystemWindowProbe.Instance;
 
+    /// <summary>Which window is the game, and whether it is in front; made by <see cref="Start"/>, or by a test.</summary>
+    internal PollingPolicy? Polling
+    {
+        get => _polling;
+        init => _polling = value;
+    }
+
+    /// <summary>The game profile for the game's process name (null while the game is not known); null for none.</summary>
+    public Func<string?, GameProfile?> Profiles { get; init; } = _ => null;
+
+    /// <summary>Milliseconds on a steady clock, for the silences that end a conversation; tests replace it.</summary>
+    internal Func<long> Clock { get; init; } = () => Environment.TickCount64;
+
     /// <summary>Lines whose translation state is kept; older lines can no longer change.</summary>
     internal int TrackedLines => _lines.Count;
 
@@ -113,6 +132,7 @@ public sealed class SubtitleWatcher : IDisposable
     {
         var known = keepGame ? _polling?.Game : null;
         Stop();
+        if (region != Region) _context.Clear(); // another place on screen: another conversation
         Region = region;
         _lines.Clear();
         var polling = _polling = new PollingPolicy(Windows, Environment.ProcessId, region, known);
@@ -144,6 +164,19 @@ public sealed class SubtitleWatcher : IDisposable
     }
 
     internal Session CreateSession(Rectangle region, Rectangle capture) => new(this, Interlocked.Increment(ref _session), region, capture);
+
+    /// <summary>The profile for the game that shows the region, or the one the settings name.</summary>
+    GameProfile? Profile()
+    {
+        string? name = null;
+        if (_polling?.Game is { } game)
+        {
+            var known = _gameProcess;
+            if (known.Id != game.ProcessId) _gameProcess = known = (game.ProcessId, Windows.ProcessName(game.ProcessId));
+            name = known.Name;
+        }
+        return Profiles(name);
+    }
 
     async Task LoopAsync(Session session, PollingPolicy polling, CancellationToken ct)
     {
@@ -332,6 +365,7 @@ public sealed class SubtitleWatcher : IDisposable
         async Task<(Reading Reading, int Recognitions)> ReadAsync(Bitmap frame, MaskStats? stats, WatcherConfig config, bool wholePlain, CancellationToken ct)
         {
             var ocr = _owner._ocr();
+            var names = _owner.Profile()?.Names; // their possessives ("Cirils") are repaired
             bool maskHasText = stats is not null && HasText(stats);
             var (top, height) = maskHasText ? TextRows(stats!.RowHistogram) : (0, frame.Height);
             Bitmap? mask = maskHasText ? _mask.Rows(top, height) : null;
@@ -353,14 +387,14 @@ public sealed class SubtitleWatcher : IDisposable
             if (mask is null || plain is null)
             {
                 var lines = (mask ?? plain) is { } only ? await Recognize(only) : new List<OcrLine>();
-                return (Result(lines, ToText(lines, gapRatio)), recognitions);
+                return (Result(lines, ToText(lines, gapRatio, names)), recognitions);
             }
 
             List<OcrLine>? plainLines = null, maskLines = null;
             if (_sources.Single is { } single)
             {
                 var lines = await Recognize(single == OcrSource.Mask ? mask : plain);
-                string text = ToText(lines, gapRatio);
+                string text = ToText(lines, gapRatio, names);
                 if (_sources.Accepts(text, lines))
                 {
                     _sources.Kept(text, lines.Count);
@@ -373,7 +407,7 @@ public sealed class SubtitleWatcher : IDisposable
             maskLines ??= await Recognize(mask);
 
             (plainLines, maskLines) = (WithoutStrayNoise(plainLines, maskLines), WithoutStrayNoise(maskLines, plainLines));
-            string plainText = ToText(plainLines, gapRatio), maskText = ToText(maskLines, gapRatio);
+            string plainText = ToText(plainLines, gapRatio, names), maskText = ToText(maskLines, gapRatio, names);
             bool useMask = TextUtil.PickReading(maskText, plainText, config.Src) == maskText;
             var (winner, winnerText, winnerLines) = useMask ? (OcrSource.Mask, maskText, maskLines) : (OcrSource.Plain, plainText, plainLines);
             _sources.Won(winner, winnerText, winnerLines.Count);
@@ -432,9 +466,9 @@ public sealed class SubtitleWatcher : IDisposable
         return lines.Where(l => !OcrSourcePolicy.LooksLikeNoise(l.Text) || other.Any(o => o.Bounds.IntersectsWith(l.Bounds))).ToList();
     }
 
-    static string ToText(List<OcrLine> lines, double gapRatio) =>
+    static string ToText(List<OcrLine> lines, double gapRatio, IReadOnlyList<string>? names) =>
         string.Join("\n", TextUtil.GroupParagraphs(lines, gapRatio, keepNumberedApart: true)
-            .Select(p => TextUtil.RepairContractions(TextUtil.Normalize(p.Text)))
+            .Select(p => TextUtil.RepairContractions(TextUtil.Normalize(p.Text), names))
             .Where(t => t.Length > 0));
 
     /// <summary>
@@ -468,9 +502,14 @@ public sealed class SubtitleWatcher : IDisposable
             state.Text = text;
         }
         _sink.LineDetected(id, text, lowConfidence);
-        var (src, tgt, intervalMs, _) = _config();
-        _ = TranslateLineAsync(id, state, version, text, lowConfidence, update ? UpdateDebounce(intervalMs) : null, src, tgt, ct);
+        _context.LineSeen(id, Clock());
+        var config = _config();
+        var job = new TranslationJob(id, text, lowConfidence, config.Src, config.Tgt, Profile(), config.ContextLines);
+        _ = TranslateLineAsync(job, state, version, update ? UpdateDebounce(config.IntervalMs) : null, ct);
     }
+
+    /// <summary>One reading of a line to translate, with what it is translated with.</summary>
+    sealed record TranslationJob(int Id, string Text, bool LowConfidence, string Src, string Tgt, GameProfile? Profile, int ContextLines);
 
     /// <summary>
     /// A grown line is reported again one poll and its confirming frame later at the earliest; waiting a little
@@ -478,9 +517,9 @@ public sealed class SubtitleWatcher : IDisposable
     /// </summary>
     internal static TimeSpan UpdateDebounce(int intervalMs) => TimeSpan.FromMilliseconds(Math.Max(250, intervalMs + 2 * ConfirmDelayMs));
 
-    async Task TranslateLineAsync(int id, LineState state, int version, string text, bool lowConfidence, TimeSpan? debounce,
-        string src, string tgt, CancellationToken ct)
+    async Task TranslateLineAsync(TranslationJob job, LineState state, int version, TimeSpan? debounce, CancellationToken ct)
     {
+        var (id, text, lowConfidence) = (job.Id, job.Text, job.LowConfidence);
         try
         {
             if (debounce is { } wait) await Delay(wait, ct);
@@ -494,9 +533,13 @@ public sealed class SubtitleWatcher : IDisposable
             {
                 try
                 {
-                    var result = await TranslateAsync(text, src, tgt, ct);
+                    var (translated, provider) = await TranslateAsync(job, ct);
                     // An earlier reading's translation is still shown until the newer one arrives, never after it.
-                    if (MarkDelivered(state, version)) _sink.LineTranslated(id, result, lowConfidence);
+                    if (MarkDelivered(state, version))
+                    {
+                        _context.Shown(id, text, translated);
+                        _sink.LineTranslated(id, translated, lowConfidence, provider);
+                    }
                     return;
                 }
                 catch (Exception ex) when (!ct.IsCancellationRequested) // a timeout is a failure, not "subtitles off"
@@ -528,13 +571,18 @@ public sealed class SubtitleWatcher : IDisposable
         }
     }
 
-    async Task<string> TranslateAsync(string text, string src, string tgt, CancellationToken ct)
+    /// <returns>The translation and the provider key it came from.</returns>
+    async Task<(string Text, string Provider)> TranslateAsync(TranslationJob job, CancellationToken ct)
     {
         await _translateGate.WaitAsync(ct);
         try
         {
-            // Each text block is translated on its own, so a key hint never gets mixed into a sentence.
-            return string.Join("\n", await _translator().TranslateAsync(text.Split('\n'), src, tgt, ct));
+            // Each text block is translated on its own, so a key hint never gets mixed into a sentence. The context is
+            // taken now, after the wait, so it holds every line shown meanwhile.
+            var translator = _translator();
+            var request = new TranslateRequest(job.Text.Split('\n'), job.Src, job.Tgt, _context.Before(job.Id, job.ContextLines), job.Profile);
+            var result = await translator.TranslateAsync(request, ct);
+            return (string.Join("\n", result.Texts), result.Provider ?? translator.Name);
         }
         finally
         {

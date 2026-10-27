@@ -137,6 +137,16 @@ public class ReadingScoreTests
     }
 
     [Fact]
+    public void RepairContractions_uses_the_game_profile_names()
+    {
+        var names = TestProfiles.Witcher3().Names;
+
+        Assert.Equal("Ciri's gone and Yennefer's here.", TextUtil.RepairContractions("Cirils gone and Yennefer!s here.", names));
+        Assert.Equal("Annals and Vests.", TextUtil.RepairContractions("Annals and Vests.", names)); // Anna and Ves are names too
+        Assert.Equal("Kaer Morhen's walls.", TextUtil.RepairContractions("Kaer Morhenls walls.", names));
+    }
+
+    [Fact]
     public void Subtitle_grouping_merges_wider_spaced_lines_but_keeps_numbered_choices_apart()
     {
         // Line boxes 24 px high, 26 px apart (1.08 line heights): one two-line subtitle.

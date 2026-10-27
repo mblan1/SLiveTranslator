@@ -1,6 +1,7 @@
 using System;
 using System.Windows.Threading;
 using SLiveTranslator.Services;
+using SLiveTranslator.UI.Overlay;
 using DRect = System.Drawing.Rectangle;
 
 namespace SLiveTranslator.UI;
@@ -15,19 +16,20 @@ public sealed class SubtitlePresenter : ISubtitleSink
     static readonly TimeSpan Linger = TimeSpan.FromSeconds(6);
 
     readonly Dispatcher _ui;
-    readonly OverlayWindow _overlay;
+    readonly OverlayHost _overlay;
     readonly Func<DRect> _region;
     readonly Func<int> _fontSize;
     readonly Func<int> _maxLines;
     readonly Func<string> _historyHotkey;
     readonly Action<string> _onError;
     readonly Action<string> _onNotice;
+    readonly Action<bool> _onPaused;
     readonly SubtitleBoard _board = new();
     readonly DispatcherTimer _linger;
     bool _live; // the game shows a subtitle right now
 
-    public SubtitlePresenter(Dispatcher ui, OverlayWindow overlay, Func<DRect> region, Func<int> fontSize, Func<int> maxLines,
-        Func<string> historyHotkey, Action<string> onError, Action<string> onNotice)
+    public SubtitlePresenter(Dispatcher ui, OverlayHost overlay, Func<DRect> region, Func<int> fontSize, Func<int> maxLines,
+        Func<string> historyHotkey, Action<string> onError, Action<string> onNotice, Action<bool> onPaused)
     {
         _ui = ui;
         _overlay = overlay;
@@ -37,6 +39,7 @@ public sealed class SubtitlePresenter : ISubtitleSink
         _historyHotkey = historyHotkey;
         _onError = onError;
         _onNotice = onNotice;
+        _onPaused = onPaused;
         _linger = new DispatcherTimer(DispatcherPriority.Normal, ui) { Interval = Linger };
         _linger.Tick += (_, _) =>
         {
@@ -108,6 +111,8 @@ public sealed class SubtitlePresenter : ISubtitleSink
         _live = false;
         RestartLinger(); // keep the last lines readable for a few seconds after the game hides them
     });
+
+    public void Paused(bool paused) => _ui.BeginInvoke(() => _onPaused(paused));
 
     public void Error(string message) => _ui.BeginInvoke(() => _onError(message));
 

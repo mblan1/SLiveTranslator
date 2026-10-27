@@ -7,16 +7,16 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Interop;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using SLiveTranslator.Capture;
+using SLiveTranslator.Diagnostics;
 using SLiveTranslator.Hotkeys;
 using SLiveTranslator.Models;
 using SLiveTranslator.Ocr;
 using SLiveTranslator.Services;
 using SLiveTranslator.Translation;
 using SLiveTranslator.UI;
+using SLiveTranslator.UI.Overlay;
 using Drawing = System.Drawing;
 using DRect = System.Drawing.Rectangle;
 using Forms = System.Windows.Forms;
@@ -27,7 +27,7 @@ public partial class App : Application
 {
     readonly SettingsStore _store = new(DataPaths.Current.SettingsFile);
     AppSettings _settings = new();
-    OverlayWindow? _overlay;
+    OverlayHost? _overlay;
     SubtitlePresenter? _presenter;
     Forms.NotifyIcon? _tray;
     Drawing.Icon? _iconIdle, _iconLive;
@@ -35,11 +35,11 @@ public partial class App : Application
     HotkeyManager? _hotkeys;
     IOcrEngine? _ocr;
     CachedTranslator? _translator;
+    readonly FreeServices _free = new();
     SubtitleWatcher? _subtitles;
     ScreenTranslator? _screenTranslator;
     CancellationTokenSource? _screenCts;
     DispatcherTimer? _clearTimer;
-    DispatcherTimer? _saveTimer;
     Mutex? _singleInstance;
     string _lastError = "";
     DateTime _lastErrorAt;
@@ -80,15 +80,14 @@ public partial class App : Application
         if (_store.MigratedFromV1) TrySaveSettings();
 
         problems.AddRange(BuildServices());
-        _overlay = new OverlayWindow();
-        _overlay.Show();
+        _overlay = new OverlayHost();
 
         _presenter = new SubtitlePresenter(Dispatcher, _overlay, () => _subtitles?.Region ?? default, () => _settings.Overlay.FontSize,
             () => _settings.Overlay.MaxLines, () => Hotkey(HotkeyAction.History), ShowError,
-            notice => _overlay.ShowStatus($"{notice} Press {Hotkey(HotkeyAction.SelectRegion)}.", StatusKind.Warning, _subtitles?.Region, 8));
+            notice => _overlay.ShowStatus($"{notice} Press {Hotkey(HotkeyAction.SelectRegion)}.", StatusKind.Warning, _subtitles?.Region, 8),
+            ShowLiveBadge);
         _screenTranslator = new ScreenTranslator(() => _ocr!, () => _translator!, Langs);
-        _subtitles = new SubtitleWatcher(() => _ocr!, () => _translator!,
-            () => (Langs().Src, Langs().Tgt, _settings.Subtitles.IntervalMs, _settings.Subtitles.ParagraphGapRatio), _presenter);
+        _subtitles = new SubtitleWatcher(() => _ocr!, () => _translator!, SubtitleConfig, _presenter);
 
         _clearTimer = new DispatcherTimer();
         _clearTimer.Tick += (_, _) =>
@@ -96,9 +95,6 @@ public partial class App : Application
             _clearTimer.Stop();
             _overlay.ClearLabels();
         };
-        _saveTimer = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
-        _saveTimer.Tick += (_, _) => _translator?.Save();
-        _saveTimer.Start();
 
         CreateTray();
         if (RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
@@ -135,6 +131,18 @@ public partial class App : Application
 
     (string Src, string Tgt) Langs() =>
         (LangCodes.FromOcrTag(_ocr?.LanguageTag), string.IsNullOrWhiteSpace(_settings.General.TargetLanguage) ? "en" : _settings.General.TargetLanguage);
+
+    WatcherConfig SubtitleConfig()
+    {
+        var (src, tgt) = Langs();
+        var subtitles = _settings.Subtitles;
+        return new WatcherConfig(src, tgt, subtitles.IntervalMs, subtitles.ParagraphGapRatio)
+        {
+            OcrMode = subtitles.OcrMode,
+            PauseWhenGameUnfocused = subtitles.PauseWhenGameUnfocused,
+            LowImpact = subtitles.LowImpact,
+        };
+    }
 
     void TrySaveSettings()
     {
@@ -179,11 +187,19 @@ public partial class App : Application
                 Log.Error(message);
                 problems.Add(message);
             }
-            // "free-mt": cache entries made before MyMemory preferred machine translation held junk corpus matches.
-            inner = new FallbackTranslator("free-mt", new GoogleTranslator(), new MyMemoryTranslator(translation.Free.MyMemoryEmail));
+            inner = _free.Chain(translation.Free.MyMemoryEmail);
         }
-        _translator?.Save();
-        _translator = new CachedTranslator(inner, DataPaths.Current.CacheFile);
+        // One cache for the whole run: it is loaded once, and a settings save only changes what answers a miss.
+        int maxEntries = Math.Max(100, _settings.Storage.CacheMaxEntries);
+        if (_translator is null)
+        {
+            _translator = new CachedTranslator(inner, DataPaths.Current.CacheFile, maxEntries);
+        }
+        else
+        {
+            _translator.Inner = inner;
+            _translator.MaxEntries = maxEntries;
+        }
         return problems;
     }
 
@@ -313,6 +329,13 @@ public partial class App : Application
             _overlay.ShowStatus("Subtitles OFF", StatusKind.Off, _subtitles.Region);
             return;
         }
+        StartSubtitles(restart: false);
+    }
+
+    /// <param name="restart">Subtitles were on before a dialog: the game found then is kept (see <see cref="SubtitleWatcher.Start"/>).</param>
+    void StartSubtitles(bool restart)
+    {
+        if (_subtitles is null || _overlay is null) return;
         if (_ocr is null)
         {
             ShowError("OCR is not available.");
@@ -322,12 +345,19 @@ public partial class App : Application
 
         var region = _settings.Subtitles.Region!.ToRectangle();
         _presenter!.Start();
-        _subtitles.Start(region);
-        _overlay.ShowLiveBadge(region, "Subtitles on");
+        _subtitles.Start(region, keepGame: restart);
+        ShowLiveBadge(paused: false);
         SetLive(true);
         if (!WarnIfLargeRegion(region))
             _overlay.ShowStatus($"Subtitles ON  ·  {Hotkey(HotkeyAction.ToggleSubtitles)} to stop  ·  {Hotkey(HotkeyAction.History)} for history",
                 StatusKind.On, region, 3);
+    }
+
+    /// <summary>The marker at the region; while the game is not in front it says why nothing is translated.</summary>
+    void ShowLiveBadge(bool paused)
+    {
+        if (_subtitles?.IsRunning != true) return; // a late message from a session that was stopped meanwhile
+        _overlay?.ShowLiveBadge(_subtitles.Region, paused ? "Subtitles paused · game not in front" : "Subtitles on");
     }
 
     void StopSubtitles()
@@ -372,13 +402,13 @@ public partial class App : Application
         var dialog = new RegionSelectWindow(screen);
         if (dialog.ShowDialog() != true || dialog.Result is not { } rect)
         {
-            if (wasRunning) ToggleSubtitles();
+            if (wasRunning) StartSubtitles(restart: true);
             return null;
         }
         _settings.Subtitles.Region = RegionSettings.From(rect);
         TrySaveSettings();
         if (!WarnIfLargeRegion(rect)) _overlay?.ShowStatus("Subtitle region saved", StatusKind.Info, rect);
-        if (wasRunning) ToggleSubtitles();
+        if (wasRunning) StartSubtitles(restart: true);
         return rect;
     }
 
@@ -408,7 +438,7 @@ public partial class App : Application
         StopSubtitles();
         var problems = BuildServices();
         if (RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
-        if (restart) ToggleSubtitles();
+        if (restart) StartSubtitles(restart: true);
         if (problems.Count > 0) _overlay?.ShowStatus(string.Join("\n", problems), StatusKind.Warning, Forms.Screen.PrimaryScreen?.Bounds, 12);
         else if (!restart) _overlay?.ShowStatus("Settings saved", StatusKind.Info, Forms.Screen.PrimaryScreen?.Bounds);
     }
@@ -437,7 +467,7 @@ public partial class App : Application
     void OnExit(object sender, ExitEventArgs e)
     {
         _subtitles?.Dispose();
-        _translator?.Save();
+        _translator?.Flush();
         _hotkeys?.Dispose();
         if (_tray is not null)
         {
@@ -457,13 +487,16 @@ public partial class App : Application
             switch (args[0])
             {
                 case "--selftest":
-                    code = await SelfTestAsync(outDir);
+                    code = await OverlaySelfTest.RunAsync(outDir);
                     break;
                 case "--translate-screen":
                     code = await TranslateScreenCliAsync(outDir);
                     break;
+                case "--bench-subtitles":
+                    code = await SubtitleBench.RunAsync(outDir);
+                    break;
                 default:
-                    Console.Error.WriteLine("Unknown option " + args[0] + ". Use --selftest [dir] or --translate-screen [dir].");
+                    Console.Error.WriteLine("Unknown option " + args[0] + ". Use --selftest [dir], --translate-screen [dir] or --bench-subtitles [dir].");
                     break;
             }
         }
@@ -473,54 +506,6 @@ public partial class App : Application
             Log.Error("cli: " + ex);
         }
         Shutdown(code);
-    }
-
-    /// <summary>Shows every overlay element with sample content, then saves the overlay rendering and a screen capture for inspection.</summary>
-    async Task<int> SelfTestAsync(string outDir)
-    {
-        Directory.CreateDirectory(outDir);
-        var overlay = new OverlayWindow();
-        overlay.Show();
-        var area = Forms.Screen.PrimaryScreen!.Bounds;
-        var subtitleRegion = new DRect(area.Left + area.Width / 5, area.Bottom - 230, area.Width * 3 / 5, 90);
-
-        overlay.ShowLabels(new[]
-        {
-            (new DRect(area.Left + 1500, area.Top + 300, 300, 40), "Bình thuốc hồi máu", 1),
-            (new DRect(area.Left + 1500, area.Top + 380, 520, 90), "Kiếm cổ. +12 Tấn công. Hiếm. Bán được 240 vàng.", 2),
-        }, area, 22);
-        overlay.ShowSubtitleLines(
-        [
-            new SubtitleLineView("Chào mừng, lữ khách.", false),
-            new SubtitleLineView("Con đường phía trước rất nguy hiểm.", false),
-            new SubtitleLineView("…", true),
-        ], subtitleRegion, 22);
-        overlay.ShowLiveBadge(subtitleRegion, "Subtitles on");
-        overlay.ShowHistory("Dialog history (3 lines)  ·  Ctrl+Shift+H to close",
-        [
-            new HistoryLineView("Chào mừng, lữ khách.", "Welcome, traveller.", false),
-            new HistoryLineView("Con đường phía trước rất nguy hiểm.", "The road ahead is dangerous.", false),
-            new HistoryLineView("", "Take this sword with you.", true),
-        ], area);
-        overlay.ShowStatus("Subtitles ON  ·  Ctrl+Shift+S to stop  ·  Ctrl+Shift+H for history", StatusKind.On, area, 30);
-        await Task.Delay(800);
-
-        using (var shot = ScreenCapture.Capture(area))
-            shot.Save(Path.Combine(outDir, "selftest_screen.png"), Drawing.Imaging.ImageFormat.Png);
-
-        double dpi = VisualTreeHelper.GetDpi(overlay).DpiScaleX;
-        var render = new RenderTargetBitmap((int)(overlay.ActualWidth * dpi), (int)(overlay.ActualHeight * dpi), 96 * dpi, 96 * dpi, PixelFormats.Pbgra32);
-        render.Render(overlay.Root);
-        var encoder = new PngBitmapEncoder();
-        encoder.Frames.Add(BitmapFrame.Create(render));
-        using (var file = File.Create(Path.Combine(outDir, "selftest_overlay.png")))
-            encoder.Save(file);
-
-        string report = $"excludedFromCapture={overlay.ExcludedFromCapture}\nscreen={area}\ndpi={dpi}\noverlaySize={overlay.ActualWidth}x{overlay.ActualHeight}\n";
-        File.WriteAllText(Path.Combine(outDir, "selftest.txt"), report);
-        Console.WriteLine(report);
-        overlay.Close();
-        return 0;
     }
 
     /// <summary>Runs the capture → OCR → translate pipeline on the primary monitor and writes the results plus an annotated screenshot.</summary>
@@ -560,7 +545,7 @@ public partial class App : Application
             }
         }
         shot.Save(Path.Combine(outDir, "translate_screen.png"), Drawing.Imaging.ImageFormat.Png);
-        _translator.Save();
+        _translator.Flush();
         return 0;
     }
 }

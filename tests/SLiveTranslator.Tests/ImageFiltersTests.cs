@@ -55,6 +55,29 @@ public class ImageFiltersTests
     }
 
     [Fact]
+    public void Only_the_measured_columns_count_but_the_whole_image_is_masked()
+    {
+        // A key hint beside the user's region is masked (OCR reads lines wider than the region), but is not region text.
+        using var frame = Dark(300, 60);
+        using (var g = Graphics.FromImage(frame))
+        {
+            g.FillRectangle(Brushes.White, 100, 20, 100, 10); // in the region
+            g.FillRectangle(Brushes.White, 250, 40, 30, 4); // beside it
+        }
+        using var mask = new Bitmap(300, 60, PixelFormat.Format32bppArgb);
+
+        var stats = ImageFilters.WhiteTextMask(frame, mask, 80, 220);
+
+        Assert.Equal(1000, stats.WhitePixels);
+        Assert.Equal(0, stats.RowHistogram[41]);
+        Assert.Equal(0, Gray(mask, 260, 41)); // masked all the same
+        // The signature covers the region only: its 128 columns over 140 px, the text from column 18 to 110.
+        Assert.Equal(255, stats.Signature[MaskStats.SignatureWidth * 12 + 5]);
+        Assert.Equal(0, stats.Signature[MaskStats.SignatureWidth * 12 + 64]);
+        Assert.Equal(stats.Signature, ImageFilters.WhiteTextMask(frame, mask, 80, 220).Signature);
+    }
+
+    [Fact]
     public void The_bitmap_overload_returns_the_same_mask()
     {
         using var frame = Subtitle("Won't you stay?");

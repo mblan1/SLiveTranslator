@@ -179,17 +179,27 @@ public static class TextUtil
     /// itself: "why,you" and ".Wrong:Footwork!" are two clean words, a junk character ("uams@Utothe") costs 2
     /// and a digit/letter mix ("11m", "pr4ctice") half its length.
     /// </summary>
-    public static int ReadingScore(string text)
+    /// <param name="language">
+    /// The OCR language. For English an accented or other non-ASCII letter counts as junk: English OCR invents them
+    /// in garbled words ("VLéfrijSéd", "yoå'd", "taßleep"), which would otherwise score like clean letters.
+    /// </param>
+    public static int ReadingScore(string text, string? language = null)
     {
+        bool ascii = IsEnglish(language);
         int score = 0;
         foreach (var raw in text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
         {
             foreach (char c in raw)
-                if (IsJunk(c)) score -= 2;
-            foreach (var part in WordParts(raw)) score += PartScore(part);
+                if (IsJunk(c) || ascii && IsForeignLetter(c)) score -= 2;
+            foreach (var part in WordParts(raw)) score += PartScore(part, ascii);
         }
         return score;
     }
+
+    static bool IsEnglish(string? language) => language is not null && language.StartsWith("en", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>A Latin, Greek or Cyrillic letter outside ASCII; scripts such as CJK are not counted.</summary>
+    static bool IsForeignLetter(char c) => c > 0x7F && c < 0x2E80 && char.IsLetter(c);
 
     /// <summary>A character that is neither text, space nor ordinary punctuation ('@', '|', '~', '$'): OCR noise.</summary>
     public static bool IsJunk(char c) => !char.IsWhiteSpace(c) && !char.IsLetterOrDigit(c) && !CommonPunctuation.Contains(c);
@@ -209,9 +219,9 @@ public static class TextUtil
         }
     }
 
-    static int PartScore(string part)
+    static int PartScore(string part, bool ascii)
     {
-        int letters = part.Count(char.IsLetter), digits = part.Count(char.IsDigit);
+        int letters = part.Count(c => char.IsLetter(c) && !(ascii && IsForeignLetter(c))), digits = part.Count(char.IsDigit);
         if (letters == 0) return digits;
         if (digits > 0) return -Math.Max(1, part.Length / 2);
         if (part.Length == 1 && "aAiIoO".IndexOf(part[0]) < 0 && part[0] < 0x2E80) return -1; // a stray letter, not a word
@@ -223,12 +233,13 @@ public static class TextUtil
     /// the other, otherwise the higher score plus a bonus for length, so a clean reading that dropped a word
     /// ("Butyou were emir.") loses to the complete one with a few slips. Ties keep <paramref name="a"/>.
     /// </summary>
-    public static string PickReading(string a, string b)
+    /// <param name="language">The OCR language, see <see cref="ReadingScore"/>.</param>
+    public static string PickReading(string a, string b, string? language = null)
     {
         string ca = Compact(a), cb = Compact(b);
         if (Math.Max(ca.Length, cb.Length) >= Math.Min(ca.Length, cb.Length) * 1.15 && Coverage(ca, cb) >= 0.75)
             return cb.Length > ca.Length ? b : a;
-        return ReadingScore(b) + 0.3 * cb.Length > ReadingScore(a) + 0.3 * ca.Length ? b : a;
+        return ReadingScore(b, language) + 0.3 * cb.Length > ReadingScore(a, language) + 0.3 * ca.Length ? b : a;
     }
 
     // ---- contractions ----

@@ -77,6 +77,21 @@ public class ReadingScoreTests
     }
 
     [Fact]
+    public void For_English_letters_english_does_not_have_count_as_junk()
+    {
+        // Real readings of one still frame: the plain image garbles a word into accented letters.
+        const string garbled = "You.p,VLéfrijSéd Ciri you'd train with hernand a witcher keeps his word.";
+        const string clean = "You promised Ciri you'd train with her, and a witcher keeps his word.";
+
+        Assert.Equal(clean, TextUtil.PickReading(clean, garbled, "en"));
+        Assert.True(TextUtil.ReadingScore("yoå'd taßleep", "en") < TextUtil.ReadingScore("you'd asleep", "en"));
+        // Other languages keep their letters: French and Vietnamese words are full of them.
+        Assert.Equal(TextUtil.ReadingScore("préféré"), TextUtil.ReadingScore("préféré", "fr"));
+        Assert.Equal(7, TextUtil.ReadingScore("préféré", "fr"));
+        Assert.Equal(TextUtil.ReadingScore("古老的剑散发着力量。"), TextUtil.ReadingScore("古老的剑散发着力量。", "en"));
+    }
+
+    [Fact]
     public void PickReading_prefers_the_longer_reading_of_a_grown_line_and_the_cleaner_of_equal_ones()
     {
         Assert.Equal("Well, yes, but... that book was horribly dull!",

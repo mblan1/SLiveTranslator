@@ -18,7 +18,7 @@ public sealed class GoogleTranslator : ITranslator
 {
     const string Endpoint = "https://translate.googleapis.com/translate_a/single";
     const int MaxCharsPerRequest = 4000;
-    static readonly HttpClient DefaultHttp = CreateClient();
+    static readonly HttpClient DefaultHttp = HttpClients.Create(TimeSpan.FromSeconds(15), "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SLiveTranslator/1.0");
 
     readonly HttpClient _http;
     DateTime _blockedUntilUtc = DateTime.MinValue;
@@ -28,14 +28,6 @@ public sealed class GoogleTranslator : ITranslator
     TimeSpan BlockPause => TimeSpan.FromMinutes(_blocksInARow switch { <= 1 => 10, 2 => 30, _ => 60 });
 
     public GoogleTranslator(HttpClient? http = null) => _http = http ?? DefaultHttp;
-
-    static HttpClient CreateClient()
-    {
-        // Don't follow redirects: a blocked network is redirected to a captcha page, and following it costs another round trip.
-        var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = TimeSpan.FromSeconds(15) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) SLiveTranslator/1.0");
-        return client;
-    }
 
     public string Name => "google";
 

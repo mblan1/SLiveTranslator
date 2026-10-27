@@ -33,6 +33,8 @@ public sealed class SubtitleTracker
     const int EmptyFramesToClear = 3;
     const int ReadingsToCompare = 3;
     const int ForceShowFrames = 4;
+    /// <summary>Fresh readings of a shown line that may still settle which of its readings is right.</summary>
+    const int SettleReadings = 4;
     const int MaxTextsPerLine = 8;
     const int MaxVotes = 24;
     const long RecentWindowMs = 12_000;
@@ -49,6 +51,8 @@ public sealed class SubtitleTracker
         public bool LowConfidence { get; set; }
         /// <summary>The shown text was read exactly alike twice. Until then a repeated reading may correct it.</summary>
         public bool Confirmed { get; set; }
+        /// <summary>Fresh readings since the line was shown with its text.</summary>
+        public int Readings { get; set; }
     }
 
     /// <summary>A distinct recent reading and how often OCR produced it.</summary>
@@ -67,6 +71,13 @@ public sealed class SubtitleTracker
 
     /// <summary>True when a changed reading waits for its confirming frame; the caller should look again soon.</summary>
     public bool AwaitingConfirmation => _stable == 1;
+
+    /// <summary>
+    /// Another independent reading would help: a changed reading waits for its confirming frame, or the line on screen
+    /// was not read exactly alike twice yet, so which of its readings is right is still open. Only its first few
+    /// readings count: readings that kept disagreeing (a bright scene behind the text) rarely settle with more.
+    /// </summary>
+    public bool Unsettled => _stable == 1 || (_showing && _recent.Count > 0 && _recent[^1] is { Confirmed: false, Readings: < SettleReadings });
 
     /// <param name="fresh">
     /// False when the frame looked unchanged and the caller passed the last OCR result again. Such a frame still
@@ -93,6 +104,7 @@ public sealed class SubtitleTracker
         }
 
         _empty = 0;
+        if (fresh && _showing && _recent.Count > 0) _recent[^1].Readings++;
         // Readings may alternate (the second line read on every other frame), so any of the last few can confirm.
         _stable = _readings.Any(r => IsSameReading(r, text)) ? _stable + 1 : 1;
         var vote = _votes.Find(v => v.Text == text);
@@ -109,6 +121,23 @@ public sealed class SubtitleTracker
     }
 
     /// <summary>
+    /// The subtitles are no longer watched (the game went to the background): a shown line counts as gone. The game
+    /// itself may have paused with the line still on screen, so the line is not reported again when it is still there
+    /// on return: it keeps the dedupe window of a line on screen, counted from leaving, not the short one after a clear.
+    /// </summary>
+    public Event? Leave(long nowMs)
+    {
+        _readings.Clear();
+        _votes.Clear();
+        _stable = 0;
+        _empty = EmptyFramesToClear;
+        if (!_showing) return null;
+        _showing = false;
+        if (_recent.MaxBy(r => r.SeenAt) is { } onScreen) onScreen.SeenAt = nowMs;
+        return new Cleared();
+    }
+
+    /// <summary>
     /// The best of the recent readings of the same text. The text on screen reads the same frame after frame while
     /// OCR noise rarely repeats, so a reading OCR produced twice beats a one-off however clean the one-off looks.
     /// </summary>
@@ -116,7 +145,7 @@ public sealed class SubtitleTracker
     {
         var same = _votes.Where(v => v.Text == text || IsSameReading(v.Text, text)).ToList();
         var repeated = same.Where(v => v.Count >= 2).ToList();
-        return (repeated.Count > 0 ? repeated : same).Select(v => v.Text).Aggregate(TextUtil.PickReading);
+        return (repeated.Count > 0 ? repeated : same).Select(v => v.Text).Aggregate((a, b) => TextUtil.PickReading(a, b));
     }
 
     bool IsRepeated(string text) => _votes.Find(v => v.Text == text) is { Count: >= 2 };
@@ -163,6 +192,7 @@ public sealed class SubtitleTracker
     static void Show(Shown line, string text, bool lowConfidence, bool confirmed, long nowMs)
     {
         line.Confirmed = confirmed;
+        line.Readings = 0;
         line.Text = text;
         line.Texts.Add(text);
         if (line.Texts.Count > MaxTextsPerLine) line.Texts.RemoveAt(0);

@@ -2,10 +2,8 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using SLiveTranslator.Capture;
@@ -31,9 +29,26 @@ public interface ISubtitleSink
     void LineFailed(int id, string original, string error);
     /// <summary>The game's subtitle disappeared.</summary>
     void Cleared();
+    /// <summary>Reading stopped because the game is not in front (<see cref="WatcherConfig.PauseWhenGameUnfocused"/>), or started again.</summary>
+    void Paused(bool paused);
     void Error(string message);
     /// <summary>A hint about the setup, e.g. the region cuts the subtitles off.</summary>
     void Notice(string message);
+}
+
+/// <summary>The settings the watcher reads on every poll, so a change applies without a restart.</summary>
+/// <param name="GapRatio">
+/// The largest gap between two lines of one subtitle in line heights (<see cref="SubtitleSettings.ParagraphGapRatio"/>).
+/// </param>
+public sealed record WatcherConfig(string Src, string Tgt, int IntervalMs, double GapRatio)
+{
+    public OcrMode OcrMode { get; init; } = OcrMode.Auto;
+
+    /// <summary>Read only while the game (the program that shows the region) is in front; see <see cref="PollingPolicy"/>.</summary>
+    public bool PauseWhenGameUnfocused { get; init; }
+
+    /// <summary>Run at below-normal priority while subtitles are on; read at start.</summary>
+    public bool LowImpact { get; init; }
 }
 
 /// <summary>
@@ -47,25 +62,28 @@ public sealed class SubtitleWatcher : IDisposable
     const int ErrorsRetriedAtInterval = 2;
     const double MinGapRatio = 0.7, MaxGapRatio = 2.5;
     const int EdgeMarginPx = 2;
-    const int ForcedReadMs = 900; // at least once a second at the default 300 ms poll
+    const int ForcedReadMs = 1000; // text on screen is read again at least this often
     const int LinesKept = 8;
+    /// <summary>Fewer white pixels in the region than one letter has: the mask shows no text.</summary>
+    const int MinTextPixels = 24;
+    /// <summary>Rows kept above and below the text, in line heights.</summary>
+    const double CropMargin = 0.6;
+    /// <summary>Empty rows a run of text rows may have inside one line (the dot of an i, a thin stroke).</summary>
+    const int MaxGapInLine = 3;
     static readonly TimeSpan TranslateRetryDelay = TimeSpan.FromSeconds(6);
 
     readonly Func<IOcrEngine> _ocr;
     readonly Func<ITranslator> _translator;
-    readonly Func<(string Src, string Tgt, int IntervalMs, double GapRatio)> _config;
+    readonly Func<WatcherConfig> _config;
     readonly ISubtitleSink _sink;
     readonly SemaphoreSlim _translateGate = new(MaxParallelTranslations);
     readonly ConcurrentDictionary<int, LineState> _lines = new();
     CancellationTokenSource? _cts;
+    LowPriorityScope? _lowPriority;
+    PollingPolicy? _polling;
     int _session;
 
-    /// <param name="config">
-    /// Languages, poll interval, and the largest gap between two lines of one subtitle in line heights
-    /// (<see cref="SubtitleSettings.ParagraphGapRatio"/>).
-    /// </param>
-    public SubtitleWatcher(Func<IOcrEngine> ocr, Func<ITranslator> translator, Func<(string Src, string Tgt, int IntervalMs, double GapRatio)> config,
-        ISubtitleSink sink)
+    public SubtitleWatcher(Func<IOcrEngine> ocr, Func<ITranslator> translator, Func<WatcherConfig> config, ISubtitleSink sink)
     {
         _ocr = ocr;
         _translator = translator;
@@ -81,24 +99,36 @@ public sealed class SubtitleWatcher : IDisposable
     /// <summary>Waits before a translation retry or a debounced update; tests replace it to run without real delays.</summary>
     internal Func<TimeSpan, CancellationToken, Task> Delay { get; init; } = Task.Delay;
 
+    /// <summary>Tells which window is in front, for <see cref="WatcherConfig.PauseWhenGameUnfocused"/>.</summary>
+    internal IWindowProbe Windows { get; init; } = SystemWindowProbe.Instance;
+
     /// <summary>Lines whose translation state is kept; older lines can no longer change.</summary>
     internal int TrackedLines => _lines.Count;
 
-    public void Start(Rectangle region)
+    /// <param name="keepGame">
+    /// Subtitles were on before a dialog (settings, region select): the game found then is kept while it runs, since
+    /// whatever window the closing dialog left in front tells nothing about it.
+    /// </param>
+    public void Start(Rectangle region, bool keepGame = false)
     {
+        var known = keepGame ? _polling?.Game : null;
         Stop();
         Region = region;
         _lines.Clear();
+        var polling = _polling = new PollingPolicy(Windows, Environment.ProcessId, region, known);
+        if (_config().LowImpact) _lowPriority = new LowPriorityScope();
         var session = CreateSession(region, CaptureRect(region, Forms.Screen.FromRectangle(region).Bounds));
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
-        _ = Task.Run(() => LoopAsync(session, ct), ct);
+        _ = Task.Run(() => LoopAsync(session, polling, ct), CancellationToken.None); // always runs, so the session is disposed
     }
 
     public void Stop()
     {
         _cts?.Cancel();
         _cts = null;
+        _lowPriority?.Dispose();
+        _lowPriority = null;
     }
 
     public void Dispose() => Stop();
@@ -115,32 +145,55 @@ public sealed class SubtitleWatcher : IDisposable
 
     internal Session CreateSession(Rectangle region, Rectangle capture) => new(this, Interlocked.Increment(ref _session), region, capture);
 
-    async Task LoopAsync(Session session, CancellationToken ct)
+    async Task LoopAsync(Session session, PollingPolicy polling, CancellationToken ct)
     {
-        int failures = 0;
-        while (!ct.IsCancellationRequested)
+        using var frames = new BitmapBuffer(); // one capture bitmap for the whole session
+        using (session)
         {
-            long started = Environment.TickCount64;
-            int interval = _config().IntervalMs;
-            try
+            int failures = 0;
+            bool away = false;
+            while (!ct.IsCancellationRequested)
             {
-                using (var frame = ScreenCapture.Capture(session.Capture))
-                    await session.ProcessFrameAsync(frame, Environment.TickCount64, ct);
-                failures = 0;
-            }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                failures++;
-                Log.Warn("subtitle loop: " + ex.Message);
-                if (failures > ErrorsRetriedAtInterval) _sink.Error(ex.Message); // one OCR hiccup is not worth a message
-            }
+                long started = Environment.TickCount64;
+                var config = _config();
+                int delay;
+                if (polling.GameAway(config.PauseWhenGameUnfocused))
+                {
+                    // Nothing to read while another program is in front; only look whether the game is back.
+                    if (!away)
+                    {
+                        session.Pause(started);
+                        _sink.Paused(true);
+                    }
+                    away = true;
+                    delay = PollingPolicy.AwayIntervalMs;
+                }
+                else
+                {
+                    if (away) _sink.Paused(false);
+                    away = false;
+                    try
+                    {
+                        var frame = ScreenCapture.Capture(session.Capture, frames);
+                        await session.ProcessFrameAsync(frame, Environment.TickCount64, ct);
+                        failures = 0;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        failures++;
+                        Log.Warn("subtitle loop: " + ex.Message);
+                        if (failures > ErrorsRetriedAtInterval) _sink.Error(ex.Message); // one OCR hiccup is not worth a message
+                    }
+                    delay = NextDelayMs(failures, session.AwaitingConfirmation, config.IntervalMs, (int)(Environment.TickCount64 - started));
+                }
 
-            try { await Task.Delay(NextDelayMs(failures, session.AwaitingConfirmation, interval, (int)(Environment.TickCount64 - started)), ct); }
-            catch (OperationCanceledException) { break; }
+                try { await Task.Delay(delay, ct); }
+                catch (OperationCanceledException) { break; }
+            }
         }
     }
 
@@ -160,19 +213,29 @@ public sealed class SubtitleWatcher : IDisposable
     /// <param name="Reading">The reading used for this frame (the last OCR result when the frame did not change).</param>
     /// <param name="OcrRan">False when the frame looked unchanged and the last reading was reused.</param>
     /// <param name="TouchesEdge">Text runs into the top or bottom of the captured strip.</param>
-    internal sealed record FrameResult(SubtitleTracker.Event? Event, string Reading, bool OcrRan, bool TouchesEdge);
+    /// <param name="Recognitions">OCR calls this frame cost: 0 to 2.</param>
+    internal sealed record FrameResult(SubtitleTracker.Event? Event, string Reading, bool OcrRan, bool TouchesEdge, int Recognitions);
 
-    sealed record Reading(List<OcrLine> Lines, string Text, bool TouchesEdge);
+    sealed record Reading(IReadOnlyList<OcrLine> Lines, string Text, bool TouchesEdge)
+    {
+        public static readonly Reading Empty = new(Array.Empty<OcrLine>(), "", false);
+    }
 
-    /// <summary>State of one subtitle session: everything the loop does with a frame, minus capture and timing.</summary>
-    internal sealed class Session
+    /// <summary>
+    /// State of one subtitle session: everything the loop does with a frame, minus capture and timing. Owns the
+    /// buffers of the mask and the crop, so a frame costs no new pixel memory.
+    /// </summary>
+    internal sealed class Session : IDisposable
     {
         readonly SubtitleWatcher _owner;
         readonly SubtitleTracker _tracker = new();
+        readonly OcrSourcePolicy _sources = new();
         readonly Rectangle _regionInCapture;
-        byte[]? _lastSignature;
+        readonly BitmapBuffer _mask = new(), _crop = new();
+        bool _readNext = true; // nothing read yet, or the game was away: the next frame is read whatever it shows
+        byte[]? _lastMask, _lastPixels; // the signatures of the last frame that was read (null: not taken)
         long _lastReadAt;
-        Reading _last = new(new List<OcrLine>(), "", false);
+        Reading _last = Reading.Empty;
         double _upscale = 1.0;
         int _edgeLines;
 
@@ -194,16 +257,37 @@ public sealed class SubtitleWatcher : IDisposable
         /// <param name="frame">A capture of <see cref="Capture"/>.</param>
         internal async Task<FrameResult> ProcessFrameAsync(Bitmap frame, long nowMs, CancellationToken ct)
         {
-            // Only the user's region decides whether the frame changed: a centred subtitle always changes pixels
-            // there, and motion beside it costs no OCR. A small change ("Yes." → "No.") on a still scene can stay
-            // below the thresholds, so text on screen is read again every second.
-            var signature = FrameSignature(frame, _regionInCapture);
-            bool ocrRan = _lastSignature is null || Changed(signature, _lastSignature)
-                          || (_last.Text.Length > 0 && nowMs - _lastReadAt >= ForcedReadMs);
+            var config = _owner._config();
+            // The mask comes first: it keeps only the white text, so it changes when the subtitle does and not when
+            // the scene behind it moves. The region's pixels decide where the mask cannot tell: without white text in
+            // the region, and while the white it shows reads as nothing (scenery, or a subtitle it cannot read), since
+            // text of another colour changes only the pixels. Once the mask has shown that it reads these subtitles
+            // (it kept winning, or Mask mode), it alone decides, so a moving scene costs no OCR with or without a
+            // subtitle. Only the region counts, so motion beside it costs nothing. A change too small to notice on a
+            // still scene, or a line of another colour changing beside a white one, is caught by reading text on
+            // screen again every second.
+            bool maskSettled = config.OcrMode == OcrMode.Mask || _sources.Single == OcrSource.Mask;
+            MaskStats? stats = config.OcrMode == OcrMode.Plain ? null
+                : ImageFilters.WhiteTextMask(frame, _mask.Get(frame.Width, frame.Height), _regionInCapture.Left, _regionInCapture.Right);
+            bool maskHasText = stats is not null && HasText(stats);
+            byte[]? mask = stats is not null && (maskSettled || maskHasText) ? stats.Signature : null;
+            byte[]? pixels = !maskSettled && (!maskHasText || _last.Text.Length == 0) ? FrameSignature(frame, _regionInCapture) : null;
+            bool maskChanged = SignatureChanged(mask, _lastMask), pixelsChanged = pixels is not null && SignatureChanged(pixels, _lastPixels);
+            bool ocrRan = _readNext || maskChanged || pixelsChanged
+                          || (_last.Text.Length > 0 && nowMs - _lastReadAt >= ForcedReadMs)
+                          // Until two readings of a line agree, it is read again whenever anything moved at all: on a
+                          // moving scene that is another independent reading; on a still one it would repeat the last.
+                          || (_tracker.Unsettled && (SignatureDiffers(mask, _lastMask) || (pixels is not null && SignatureDiffers(pixels, _lastPixels))));
+            int recognitions = 0;
             if (ocrRan)
             {
-                _last = await _owner.ReadAsync(frame, _regionInCapture, _upscale, ct);
-                _lastSignature = signature; // only after a successful read, so a failed frame is read again
+                // Only the pixels changed: what changed is not white text, so it may be outside the rows of the white.
+                (_last, recognitions) = await ReadAsync(frame, stats, config, wholePlain: pixelsChanged && !maskChanged, ct);
+                // Only after a successful read, so a failed frame is read again. The pixels are kept even while the
+                // mask alone decides, to compare with if it stops winning.
+                _readNext = false;
+                _lastMask = mask;
+                _lastPixels = pixels ?? (config.OcrMode == OcrMode.Mask ? null : FrameSignature(frame, _regionInCapture));
                 _lastReadAt = nowMs;
                 _upscale = NextUpscale(_last.Lines, _upscale);
             }
@@ -223,37 +307,119 @@ public sealed class SubtitleWatcher : IDisposable
                     _owner._sink.Cleared();
                     break;
             }
-            return new FrameResult(e, _last.Text, ocrRan, _last.TouchesEdge);
+            return new FrameResult(e, _last.Text, ocrRan, _last.TouchesEdge, recognitions);
+        }
+
+        /// <summary>The game went to the background: what it showed counts as gone, and its first frame back is read anew.</summary>
+        internal void Pause(long nowMs)
+        {
+            _readNext = true;
+            _last = Reading.Empty;
+            if (_tracker.Leave(nowMs) is SubtitleTracker.Cleared) _owner._sink.Cleared();
+        }
+
+        static bool HasText(MaskStats stats) => stats.WhitePixels >= MinTextPixels;
+
+        /// <summary>
+        /// Recognizes the frame as it is and as its white-text mask, or only the one that keeps winning (see
+        /// <see cref="OcrSourcePolicy"/>), and keeps the better reading. The mask removes the moving scene behind white
+        /// subtitles; the plain frame covers subtitles of another colour. Only the rows with white text are read, at the
+        /// full width: OCR takes longer and misses more on a bigger, busier image. Only lines over the user's region
+        /// count, so key hints beside it ("Space Skip") are left out. Separate text blocks (subtitle, a dialog choice,
+        /// a key hint) are kept on separate lines.
+        /// </summary>
+        /// <param name="wholePlain">Read all rows of the plain frame: the change was not in the white text.</param>
+        async Task<(Reading Reading, int Recognitions)> ReadAsync(Bitmap frame, MaskStats? stats, WatcherConfig config, bool wholePlain, CancellationToken ct)
+        {
+            var ocr = _owner._ocr();
+            bool maskHasText = stats is not null && HasText(stats);
+            var (top, height) = maskHasText ? TextRows(stats!.RowHistogram) : (0, frame.Height);
+            Bitmap? mask = maskHasText ? _mask.Rows(top, height) : null;
+            int plainTop = wholePlain ? 0 : top;
+            // Once the mask keeps winning, a frame without white text has no text: the plain frame would read the scene.
+            Bitmap? plain = config.OcrMode == OcrMode.Mask || (mask is null && _sources.Single == OcrSource.Mask) ? null
+                : wholePlain || height == frame.Height ? frame : _crop.CopyRows(frame, top, height);
+            double gapRatio = Math.Clamp(config.GapRatio, MinGapRatio, MaxGapRatio);
+            int recognitions = 0;
+
+            async Task<List<OcrLine>> Recognize(Bitmap image)
+            {
+                recognitions++;
+                return OverRegion(await ocr.RecognizeAsync(image, ct, _upscale), image == mask ? top : plainTop);
+            }
+
+            Reading Result(List<OcrLine> lines, string text) => new(lines, text, TouchesEdge(lines, frame.Height));
+
+            if (mask is null || plain is null)
+            {
+                var lines = (mask ?? plain) is { } only ? await Recognize(only) : new List<OcrLine>();
+                return (Result(lines, ToText(lines, gapRatio)), recognitions);
+            }
+
+            List<OcrLine>? plainLines = null, maskLines = null;
+            if (_sources.Single is { } single)
+            {
+                var lines = await Recognize(single == OcrSource.Mask ? mask : plain);
+                string text = ToText(lines, gapRatio);
+                if (_sources.Accepts(text, lines))
+                {
+                    _sources.Kept(text, lines.Count);
+                    return (Result(lines, text), recognitions);
+                }
+                if (single == OcrSource.Mask) maskLines = lines;
+                else plainLines = lines;
+            }
+            plainLines ??= await Recognize(plain);
+            maskLines ??= await Recognize(mask);
+
+            (plainLines, maskLines) = (WithoutStrayNoise(plainLines, maskLines), WithoutStrayNoise(maskLines, plainLines));
+            string plainText = ToText(plainLines, gapRatio), maskText = ToText(maskLines, gapRatio);
+            bool useMask = TextUtil.PickReading(maskText, plainText, config.Src) == maskText;
+            var (winner, winnerText, winnerLines) = useMask ? (OcrSource.Mask, maskText, maskLines) : (OcrSource.Plain, plainText, plainLines);
+            _sources.Won(winner, winnerText, winnerLines.Count);
+            return (Result(winnerLines, winnerText), recognitions);
+        }
+
+        /// <summary>The readable lines over the user's region, moved from the rows that were read back into the capture.</summary>
+        List<OcrLine> OverRegion(IReadOnlyList<OcrLine> lines, int top)
+        {
+            var result = new List<OcrLine>(lines.Count);
+            foreach (var line in lines)
+            {
+                if (!IsReadable(line) || line.Bounds.Left >= _regionInCapture.Right || line.Bounds.Right <= _regionInCapture.Left) continue;
+                result.Add(top == 0 ? line : line with { Bounds = line.Bounds with { Y = line.Bounds.Y + top } });
+            }
+            return result;
+        }
+
+        public void Dispose()
+        {
+            _mask.Dispose();
+            _crop.Dispose();
         }
     }
 
     /// <summary>
-    /// Reads the frame as it is and as a white-text mask, and keeps the better reading. The mask removes the
-    /// moving scene behind white subtitles; the plain reading covers games whose subtitles are not white.
-    /// Only lines over the user's region count, so key hints beside it ("Space Skip") are left out.
-    /// Separate text blocks (subtitle, a dialog choice, a key hint) are kept on separate lines.
+    /// The rows to recognize: from the first to the last row with white text, widened by
+    /// <see cref="CropMargin"/> of a line height so the glyphs keep some background around them. OCR time grows with
+    /// the pixels, and a subtitle fills only part of the strip. The line height is the tallest run of rows with text.
     /// </summary>
-    async Task<Reading> ReadAsync(Bitmap frame, Rectangle region, double upscale, CancellationToken ct)
+    internal static (int Top, int Height) TextRows(int[] rowInk)
     {
-        var ocr = _ocr();
-        var plain = OverRegion(await ocr.RecognizeAsync(frame, ct, upscale), region);
-        List<OcrLine> masked;
-        using (var mask = new Bitmap(frame.Width, frame.Height, PixelFormat.Format32bppArgb))
+        int first = -1, last = -1, runStart = -1, tallest = 0;
+        for (int y = 0; y < rowInk.Length; y++)
         {
-            ImageFilters.WhiteTextMask(frame, mask);
-            masked = OverRegion(await ocr.RecognizeAsync(mask, ct, upscale), region);
+            if (rowInk[y] == 0) continue;
+            if (first < 0) first = y;
+            if (runStart < 0 || y - last > MaxGapInLine + 1) runStart = y;
+            last = y;
+            tallest = Math.Max(tallest, last - runStart + 1);
         }
-        (plain, masked) = (WithoutStrayNoise(plain, masked), WithoutStrayNoise(masked, plain));
-
-        double gapRatio = Math.Clamp(_config().GapRatio, MinGapRatio, MaxGapRatio);
-        string plainText = ToText(plain, gapRatio), maskedText = ToText(masked, gapRatio);
-        bool useMask = TextUtil.PickReading(maskedText, plainText) == maskedText;
-        var lines = useMask ? masked : plain;
-        return new Reading(lines, useMask ? maskedText : plainText, TouchesEdge(lines, frame.Height));
+        if (first < 0) return (0, rowInk.Length);
+        int margin = (int)Math.Ceiling(tallest * CropMargin);
+        int top = Math.Max(0, first - margin), bottom = Math.Min(rowInk.Length, last + 1 + margin);
+        return (top, bottom - top);
     }
-
-    static List<OcrLine> OverRegion(IReadOnlyList<OcrLine> lines, Rectangle region) =>
-        lines.Where(l => IsReadable(l) && l.Bounds.Left < region.Right && l.Bounds.Right > region.Left).ToList();
 
     /// <summary>
     /// Drops the lines that only this reading has and that look like noise, as long as the other reading saw clean
@@ -262,11 +428,9 @@ public sealed class SubtitleWatcher : IDisposable
     /// </summary>
     static List<OcrLine> WithoutStrayNoise(List<OcrLine> lines, List<OcrLine> other)
     {
-        if (!other.Any(o => !LooksLikeNoise(o.Text))) return lines;
-        return lines.Where(l => !LooksLikeNoise(l.Text) || other.Any(o => o.Bounds.IntersectsWith(l.Bounds))).ToList();
+        if (!other.Any(o => !OcrSourcePolicy.LooksLikeNoise(o.Text))) return lines;
+        return lines.Where(l => !OcrSourcePolicy.LooksLikeNoise(l.Text) || other.Any(o => o.Bounds.IntersectsWith(l.Bounds))).ToList();
     }
-
-    static bool LooksLikeNoise(string text) => text.Any(TextUtil.IsJunk) || !SubtitleTracker.LooksReadable(text);
 
     static string ToText(List<OcrLine> lines, double gapRatio) =>
         string.Join("\n", TextUtil.GroupParagraphs(lines, gapRatio, keepNumberedApart: true)
@@ -393,7 +557,7 @@ public sealed class SubtitleWatcher : IDisposable
     }
 
     /// <summary>Subtitles are usually big enough to read at 1x (much faster); small text gets 2x.</summary>
-    static double NextUpscale(List<OcrLine> lines, double current)
+    static double NextUpscale(IReadOnlyList<OcrLine> lines, double current)
     {
         if (lines.Count == 0) return current;
         var heights = lines.Select(l => l.Bounds.Height).OrderBy(h => h).ToList();
@@ -401,37 +565,39 @@ public sealed class SubtitleWatcher : IDisposable
         return median < 16 ? 2.0 : median > 24 ? 1.0 : current;
     }
 
-    /// <summary>Tiny grayscale thumbnail used to detect whether the region changed since the last frame.</summary>
+    /// <summary>Tiny greyscale thumbnail (the mean of each cell) used to detect whether the area changed since the last frame.</summary>
     /// <param name="area">The part of the frame to sample; the whole frame when omitted.</param>
-    internal static byte[] FrameSignature(Bitmap frame, Rectangle? area = null)
+    internal static unsafe byte[] FrameSignature(Bitmap frame, Rectangle? area = null)
     {
         const int W = 64, H = 16;
-        using var small = new Bitmap(W, H, PixelFormat.Format32bppArgb);
-        using (var g = Graphics.FromImage(small))
-        {
-            g.InterpolationMode = InterpolationMode.HighQualityBilinear;
-            g.DrawImage(frame, new Rectangle(0, 0, W, H), area ?? new Rectangle(0, 0, frame.Width, frame.Height), GraphicsUnit.Pixel);
-        }
-        var data = small.LockBits(new Rectangle(0, 0, W, H), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        var whole = new Rectangle(0, 0, frame.Width, frame.Height);
+        var a = Rectangle.Intersect(area ?? whole, whole);
+        var signature = new byte[W * H];
+        if (a.Width == 0 || a.Height == 0) return signature;
+
+        Span<long> sums = stackalloc long[W * H];
+        Span<int> counts = stackalloc int[W * H];
+        var data = frame.LockBits(a, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
         try
         {
-            var pixels = new byte[data.Stride * H];
-            Marshal.Copy(data.Scan0, pixels, 0, pixels.Length);
-            var signature = new byte[W * H];
-            for (int y = 0; y < H; y++)
+            for (int y = 0; y < a.Height; y++)
             {
-                for (int x = 0; x < W; x++)
+                byte* p = (byte*)data.Scan0 + (long)y * data.Stride;
+                int cellRow = y * H / a.Height * W;
+                for (int x = 0; x < a.Width; x++, p += 4)
                 {
-                    int o = y * data.Stride + x * 4;
-                    signature[y * W + x] = (byte)((pixels[o] * 114 + pixels[o + 1] * 587 + pixels[o + 2] * 299) / 1000);
+                    int cell = cellRow + x * W / a.Width;
+                    sums[cell] += p[0] * 114 + p[1] * 587 + p[2] * 299;
+                    counts[cell]++;
                 }
             }
-            return signature;
         }
         finally
         {
-            small.UnlockBits(data);
+            frame.UnlockBits(data);
         }
+        for (int i = 0; i < signature.Length; i++) signature[i] = (byte)(sums[i] / (1000L * Math.Max(1, counts[i])));
+        return signature;
     }
 
     internal static double MeanAbsDiff(byte[] a, byte[] b)
@@ -442,8 +608,8 @@ public sealed class SubtitleWatcher : IDisposable
     }
 
     /// <summary>
-    /// The region changed: on average (the scene moved), or strongly in one cell (a line appeared or changed on a
-    /// still scene, which moves the average of the whole region by a fraction of a level).
+    /// The area changed: on average (the scene moved), or strongly in one cell (a line appeared or changed on a
+    /// still scene, which moves the average of the whole area by a fraction of a level).
     /// </summary>
     internal static bool Changed(byte[] a, byte[] b)
     {
@@ -452,4 +618,9 @@ public sealed class SubtitleWatcher : IDisposable
             if (Math.Abs(a[i] - b[i]) > 12) return true;
         return false;
     }
+
+    /// <summary>A signature taken on one frame and not on the other is a change: white text appeared or went.</summary>
+    static bool SignatureChanged(byte[]? now, byte[]? last) => now is null || last is null ? now != last : Changed(now, last);
+
+    static bool SignatureDiffers(byte[]? now, byte[]? last) => now is null || last is null ? now != last : !now.AsSpan().SequenceEqual(last);
 }

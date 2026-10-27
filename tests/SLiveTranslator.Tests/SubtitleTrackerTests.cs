@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Drawing;
+using System.Linq;
 using SLiveTranslator.Ocr;
 using SLiveTranslator.Services;
 using Xunit;
@@ -339,5 +340,78 @@ public class SubtitleTrackerTests
         Assert.False(SubtitleWatcher.IsReadable(new OcrLine("e", Rectangle.Empty)));
         Assert.True(SubtitleWatcher.IsReadable(new OcrLine("Geralt: Where is it?", Rectangle.Empty)));
         Assert.True(SubtitleWatcher.IsReadable(new OcrLine("狮鹫在哪里？", Rectangle.Empty)));
+    }
+
+    [Fact]
+    public void Leaving_clears_a_shown_line_and_resets_the_readings()
+    {
+        var tracker = new SubtitleTracker();
+        tracker.Observe("Where is the griffin?", 0);
+        tracker.Observe("Where is the griffin?", 150);
+
+        Assert.IsType<SubtitleTracker.Cleared>(tracker.Leave(300));
+        Assert.Null(tracker.Leave(450)); // nothing shown any more
+        Assert.False(tracker.Unsettled);
+        Assert.Null(tracker.Observe("Out by the old mill, sir.", 3_500)); // a fresh start: needs its confirming frame again
+        Assert.IsType<SubtitleTracker.NewLine>(tracker.Observe("Out by the old mill, sir.", 3_650));
+    }
+
+    [Fact]
+    public void A_line_still_on_screen_after_leaving_stays_the_same_line_for_the_usual_twelve_seconds()
+    {
+        // Leaving is not the game clearing the line: the game may pause with it on screen while the player is away.
+        var tracker = new SubtitleTracker();
+        tracker.Observe("Where is the griffin?", 0);
+        tracker.Observe("Where is the griffin?", 150);
+        tracker.Leave(10_000);
+
+        Assert.Null(tracker.Observe("Where is the griffin?", 15_000));
+        Assert.Null(tracker.Observe("Where is the griffin?", 15_150)); // five seconds away, 15 s after it was first read
+
+        var later = new SubtitleTracker();
+        later.Observe("Where is the griffin?", 0);
+        later.Observe("Where is the griffin?", 150);
+        later.Leave(300);
+        later.Observe("Where is the griffin?", 12_500);
+        Assert.IsType<SubtitleTracker.NewLine>(later.Observe("Where is the griffin?", 12_650)); // away longer: a repeat
+    }
+
+    [Fact]
+    public void A_line_stays_unsettled_only_for_its_first_few_readings()
+    {
+        // Readings that keep disagreeing (bright pixels behind the text) rarely settle with more of them.
+        var tracker = new SubtitleTracker();
+        string[] readings =
+        [
+            "Where is the griffin, Geralt?", "Where is the griffln, Geralt?", "Wnere is the griffin, Geralt?",
+            "Where is the grilfin, Geralt?", "Where is the griffin, Gerait?", "Where is tne griffin, Geralt?",
+            "Where ls the griffin, Geralt?",
+        ];
+        tracker.Observe(readings[0], 0);
+        tracker.Observe(readings[1], 150);
+
+        var unsettled = readings.Skip(2).Select((r, i) =>
+        {
+            tracker.Observe(r, 300 + i * 150);
+            return tracker.Unsettled;
+        }).ToList();
+
+        Assert.Equal([true, true, true, false, false], unsettled);
+    }
+
+    [Fact]
+    public void A_line_is_unsettled_until_two_fresh_readings_agree_exactly()
+    {
+        var tracker = new SubtitleTracker();
+        tracker.Observe("Eskers gone to the mountains again, hasn't he?", 0);
+        Assert.True(tracker.Unsettled); // waits for its confirming frame
+        Assert.IsType<SubtitleTracker.NewLine>(tracker.Observe("Eskells gone to the mountains again, hasn't he?", 150));
+        Assert.True(tracker.Unsettled); // shown, but the readings disagree
+        tracker.Observe("Eskells gone to the mountains again, hasn't he?", 300, fresh: false);
+        Assert.True(tracker.Unsettled); // an unchanged frame is no new reading
+
+        tracker.Observe("Eskells gone to the mountains again, hasn't he?", 450);
+
+        Assert.False(tracker.Unsettled);
     }
 }

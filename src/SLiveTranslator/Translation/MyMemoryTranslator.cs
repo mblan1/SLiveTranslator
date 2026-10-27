@@ -20,7 +20,7 @@ public sealed class MyMemoryTranslator : ITranslator
     const string Endpoint = "https://api.mymemory.translated.net/get";
     const int MaxBytesPerRequest = 480; // the API rejects queries over 500 bytes
     static readonly TimeSpan QuotaPause = TimeSpan.FromHours(1);
-    static readonly HttpClient DefaultHttp = CreateClient();
+    static readonly HttpClient DefaultHttp = HttpClients.Create(TimeSpan.FromSeconds(20), "SLiveTranslator/1.0");
 
     readonly HttpClient _http;
     readonly string? _email;
@@ -30,13 +30,6 @@ public sealed class MyMemoryTranslator : ITranslator
     {
         _email = string.IsNullOrWhiteSpace(email) ? null : email.Trim();
         _http = http ?? DefaultHttp;
-    }
-
-    static HttpClient CreateClient()
-    {
-        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("SLiveTranslator/1.0");
-        return client;
     }
 
     public string Name => "mymemory";

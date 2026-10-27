@@ -70,14 +70,17 @@ public sealed class WindowsOcrEngine : IOcrEngine
         }
         ct.ThrowIfCancellationRequested();
 
-        var lines = new List<OcrLine>();
-        foreach (var line in result.Lines)
+        // Each WinRT property read creates a projection object: read every collection once.
+        var resultLines = result.Lines;
+        var lines = new List<OcrLine>(resultLines.Count);
+        foreach (var line in resultLines)
         {
             var text = line.Text?.Trim();
-            if (string.IsNullOrEmpty(text) || line.Words.Count == 0) continue;
+            var words = line.Words;
+            if (string.IsNullOrEmpty(text) || words.Count == 0) continue;
 
             double l = double.MaxValue, t = double.MaxValue, r = double.MinValue, b = double.MinValue;
-            foreach (var word in line.Words)
+            foreach (var word in words)
             {
                 var rc = word.BoundingRect;
                 l = Math.Min(l, rc.Left);
@@ -141,12 +144,13 @@ public sealed class WindowsOcrEngine : IOcrEngine
         }
     }
 
+    static readonly Guid MemoryBufferByteAccess = new("5B0D3235-4DBA-4D44-865E-8F1D0E4FD04D");
+
     /// <summary>Raw pointer to a WinRT memory buffer through the COM interface IMemoryBufferByteAccess.</summary>
     static unsafe byte* GetBytePointer(IMemoryBufferReference reference, out uint capacity)
     {
         var unknown = ((WinRT.IWinRTObject)reference).NativeObject.ThisPtr;
-        var iid = new Guid("5B0D3235-4DBA-4D44-865E-8F1D0E4FD04D");
-        Marshal.ThrowExceptionForHR(Marshal.QueryInterface(unknown, in iid, out var access));
+        Marshal.ThrowExceptionForHR(Marshal.QueryInterface(unknown, in MemoryBufferByteAccess, out var access));
         try
         {
             // vtable: QueryInterface, AddRef, Release, GetBuffer(byte** value, uint* capacity)

@@ -17,6 +17,15 @@ public static class ScreenCapture
         return bmp;
     }
 
+    /// <summary>Copies a screen rectangle into the buffer's bitmap of that size, so a frame needs no new pixel memory.</summary>
+    internal static Bitmap Capture(Rectangle rect, BitmapBuffer buffer)
+    {
+        var bmp = buffer.Get(Math.Max(1, rect.Width), Math.Max(1, rect.Height));
+        using var g = Graphics.FromImage(bmp);
+        g.CopyFromScreen(rect.Left, rect.Top, 0, 0, bmp.Size, CopyPixelOperation.SourceCopy);
+        return bmp;
+    }
+
     /// <summary>
     /// Bounds of the foreground window (normally the game) in physical pixels, clipped to its monitor.
     /// Falls back to the primary monitor when the foreground window is ours or unusable.

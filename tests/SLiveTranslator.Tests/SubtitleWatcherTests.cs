@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using SLiveTranslator.Models;
 using SLiveTranslator.Ocr;
 using SLiveTranslator.Services;
 using SLiveTranslator.Translation;
@@ -96,9 +97,10 @@ public class SubtitleWatcherTests
         int _frame;
         long _now;
 
-        public Harness(Func<TimeSpan, CancellationToken, Task>? delay = null, ITranslator? translator = null, double gapRatio = 1.3)
+        public Harness(Func<TimeSpan, CancellationToken, Task>? delay = null, ITranslator? translator = null, double gapRatio = 1.3,
+            OcrMode mode = OcrMode.Auto)
         {
-            Watcher = new SubtitleWatcher(() => Ocr, () => translator ?? Translator, () => ("en", "vi", 300, gapRatio), Sink)
+            Watcher = new SubtitleWatcher(() => Ocr, () => translator ?? Translator, () => new WatcherConfig("en", "vi", 300, gapRatio) { OcrMode = mode }, Sink)
             {
                 Delay = delay ?? ((span, _) =>
                 {
@@ -117,7 +119,10 @@ public class SubtitleWatcherTests
         public SubtitleWatcher.Session Session { get; }
         public int Id(int localId) => Session.Id * 1_000_000 + localId;
 
-        /// <summary>Shows one frame whose OCR result is the given lines; the pixels change every frame.</summary>
+        /// <summary>
+        /// Shows one frame whose OCR result is the given lines. Its white mark (the "text" of the mask, all rows high, so
+        /// nothing is cropped) moves every frame, so the frame always counts as changed.
+        /// </summary>
         public SubtitleWatcher.FrameResult Show(params OcrLine[] lines)
         {
             Ocr.Lines = lines;
@@ -128,10 +133,21 @@ public class SubtitleWatcherTests
         /// <summary>Shows the last frame again, pixel for pixel.</summary>
         public SubtitleWatcher.FrameResult Repeat() => Process();
 
+        /// <summary>The time of the next poll, for a frame the test draws itself.</summary>
+        public long Tick() => _now += 300;
+
+        public long Now => _now;
+
+        public void Wait(long ms) => _now += ms;
+
         SubtitleWatcher.FrameResult Process()
         {
             using var frame = new Bitmap(Capture.Width, Capture.Height, PixelFormat.Format32bppArgb);
-            using (var g = Graphics.FromImage(frame)) g.Clear(_frame % 2 == 0 ? Color.FromArgb(20, 20, 20) : Color.FromArgb(70, 70, 70));
+            using (var g = Graphics.FromImage(frame))
+            {
+                g.Clear(_frame % 2 == 0 ? Color.FromArgb(20, 20, 20) : Color.FromArgb(70, 70, 70));
+                g.FillRectangle(Brushes.White, 210 + _frame % 2 * 6, 0, 4, Capture.Height);
+            }
             _now += 300;
             return Session.ProcessFrameAsync(frame, _now, CancellationToken.None).GetAwaiter().GetResult();
         }
@@ -216,11 +232,14 @@ public class SubtitleWatcherTests
         h.Ocr.Lines = [Line("Where is the griffin?", 350, 300)];
 
         var first = await h.Session.ProcessFrameAsync(frame, 300, CancellationToken.None);
+        int calls = h.Ocr.Calls;
         var second = await h.Session.ProcessFrameAsync(frame, 400, CancellationToken.None);
 
         Assert.True(first.OcrRan);
         Assert.False(second.OcrRan);
-        Assert.Equal(2, h.Ocr.Calls); // the plain frame and the mask, once
+        Assert.Equal(1, calls); // no white text in the frame: only the plain frame is read
+        Assert.Equal(calls, h.Ocr.Calls);
+        Assert.Equal(0, second.Recognitions);
         Assert.IsType<SubtitleTracker.NewLine>(second.Event);
     }
 
@@ -232,9 +251,9 @@ public class SubtitleWatcherTests
         h.Show(Line("Yes.", 470, 60));
         h.Ocr.Lines = [Line("No.", 475, 50)];
 
-        var reads = Enumerable.Range(0, 4).Select(_ => h.Repeat().OcrRan).ToList();
+        var reads = Enumerable.Range(0, 5).Select(_ => h.Repeat().OcrRan).ToList();
 
-        Assert.Equal([false, false, true, false], reads); // 300 ms polls: read again 900 ms after the last read
+        Assert.Equal([false, false, false, true, false], reads); // 300 ms polls: read again once a second has passed, 1.2 s after the last read
         Assert.Contains(h.Sink.DetectedLines, d => d.Text == "No.");
     }
 
@@ -329,6 +348,339 @@ public class SubtitleWatcherTests
         Assert.False(SubtitleWatcher.TouchesEdge([Line("ing our young damsel to the lower courtyard", 0, 1000)], 100)); // sides cannot cut
         Assert.True(SubtitleWatcher.TouchesEdge([Line("our young damsel", 350, 300, top: 0)], 100));
         Assert.True(SubtitleWatcher.TouchesEdge([Line("to the lower courtyard", 350, 300, top: 71)], 100)); // ends at row 99
+    }
+
+    // ---- what is read, and how often ----
+
+    /// <summary>A frame of the capture strip: a still or moving grey scene, with white bars standing in for text.</summary>
+    static Bitmap Strip(int sceneGrey, params Rectangle[] whiteText)
+    {
+        var bmp = new Bitmap(Capture.Width, Capture.Height, PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(bmp);
+        g.Clear(Color.FromArgb(sceneGrey, sceneGrey + 4, sceneGrey + 8));
+        foreach (var r in whiteText) g.FillRectangle(Brushes.White, r);
+        return bmp;
+    }
+
+    static async Task<SubtitleWatcher.FrameResult> Process(Harness h, Bitmap frame, long now)
+    {
+        using (frame) return await h.Session.ProcessFrameAsync(frame, now, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task A_moving_scene_behind_unchanged_white_text_costs_no_ocr()
+    {
+        // The mask keeps only the white text, so a scene that moves behind it does not count as a change.
+        var h = new Harness();
+        h.Ocr.Lines = [Line("Where is the griffin?", 350, 300)];
+        var text = new Rectangle(350, 40, 300, 28);
+
+        var first = await Process(h, Strip(30, text), 300);
+        var second = await Process(h, Strip(90, text), 600);
+        var third = await Process(h, Strip(60, text), 900);
+
+        Assert.True(first.OcrRan);
+        Assert.False(second.OcrRan);
+        Assert.False(third.OcrRan);
+    }
+
+    [Fact]
+    public async Task While_the_white_in_the_region_reads_as_nothing_the_region_pixels_decide_too()
+    {
+        // A white icon or snow and no subtitle: a line of another colour would change only the pixels, so a moving
+        // scene is read, as it was before the mask came first.
+        var h = new Harness();
+        var icon = new Rectangle(250, 6, 12, 12);
+
+        var first = await Process(h, Strip(30, icon), 300);
+        var moved = await Process(h, Strip(90, icon), 600);
+        var still = await Process(h, Strip(90, icon), 900);
+
+        Assert.Equal([true, true, false], new[] { first.OcrRan, moved.OcrRan, still.OcrRan });
+    }
+
+    static Bitmap Painted(Bitmap frame, Color colour, Rectangle area)
+    {
+        using var g = Graphics.FromImage(frame);
+        using var brush = new SolidBrush(colour);
+        g.FillRectangle(brush, area);
+        return frame;
+    }
+
+    [Fact]
+    public async Task A_line_of_another_colour_beside_white_scenery_is_read_from_the_whole_plain_frame()
+    {
+        // A white icon in the region and a yellow dialog choice appearing below it on a still scene: the mask does not
+        // change, the region's pixels do. The plain frame is read whole, not only the rows of the icon.
+        var h = new Harness();
+        var icon = new Rectangle(250, 6, 12, 12);
+        await Process(h, Strip(40, icon), 300);
+        h.Ocr.Lines = [Line("1. I'll stay a little longer.", 330, 340, top: 60)];
+        h.Ocr.MaskLines = [];
+
+        var choice = await Process(h, Painted(Strip(40, icon), Color.Gold, new Rectangle(330, 60, 340, 28)), 600);
+
+        Assert.True(choice.OcrRan);
+        Assert.Equal(2, choice.Recognitions);
+        Assert.Equal("1. I'll stay a little longer.", choice.Reading);
+        Assert.Contains(new Size(Capture.Width, Capture.Height), h.Ocr.Images);
+    }
+
+    [Fact]
+    public async Task Once_the_mask_keeps_winning_a_frame_without_white_text_costs_no_recognition_even_while_the_scene_moves()
+    {
+        // Exploring with no subtitle: the plain frame would only read the scene, on every poll.
+        var h = new Harness();
+        var griffin = Line("Where is the griffin?", 350, 300);
+        for (int i = 0; i < OcrSourcePolicy.WinsToSettle; i++) h.Show(griffin);
+        int calls = h.Ocr.Calls;
+
+        var gone = await Process(h, Strip(30), h.Tick());
+        var moved = await Process(h, Strip(90), h.Tick());
+        var movedAgain = await Process(h, Strip(60), h.Tick());
+
+        Assert.Equal("", gone.Reading);
+        Assert.Equal(0, gone.Recognitions);
+        Assert.False(moved.OcrRan);
+        Assert.False(movedAgain.OcrRan);
+        Assert.Equal(calls, h.Ocr.Calls);
+    }
+
+    [Fact]
+    public async Task A_short_answer_swapped_on_a_still_scene_is_read_at_once()
+    {
+        // "Yes." → "No.": a few changed cells of the mask, read on the next poll instead of a second later.
+        var h = new Harness();
+        h.Ocr.Lines = [Line("Yes.", 470, 60)];
+        await Process(h, Strip(40, new Rectangle(470, 40, 60, 28)), 300);
+        h.Ocr.Lines = [Line("No.", 475, 50)];
+
+        var swapped = await Process(h, Strip(40, new Rectangle(475, 40, 18, 28), new Rectangle(500, 40, 20, 28)), 600);
+
+        Assert.True(swapped.OcrRan);
+        Assert.Equal("No.", swapped.Reading);
+    }
+
+    [Fact]
+    public async Task Without_white_text_the_region_pixels_decide_and_only_the_plain_frame_is_read()
+    {
+        // Subtitles that are not white: the mask is empty, so the plain frame is read whenever the region changes.
+        var h = new Harness();
+        h.Ocr.Lines = [Line("Where is the griffin?", 350, 300)];
+
+        var first = await Process(h, Strip(30), 300);
+        var same = await Process(h, Strip(30), 600);
+        var changed = await Process(h, Strip(90), 900);
+
+        Assert.Equal([true, false, true], new[] { first.OcrRan, same.OcrRan, changed.OcrRan });
+        Assert.Equal(1, first.Recognitions);
+        Assert.Equal(0, h.Ocr.MaskCalls);
+    }
+
+    [Fact]
+    public async Task Only_the_rows_with_text_are_read_and_line_positions_come_back_in_capture_rows()
+    {
+        var h = new Harness();
+        h.Ocr.Lines = [Line("Where is the griffin?", 350, 300, top: 1)]; // at the top of what OCR is given
+
+        var result = await Process(h, Strip(30, new Rectangle(350, 50, 300, 20)), 300);
+
+        // 20 text rows and 12 rows around them on each side.
+        Assert.All(h.Ocr.Images, size => Assert.Equal(new Size(Capture.Width, 44), size));
+        Assert.False(result.TouchesEdge); // row 1 of the crop is row 39 of the capture
+    }
+
+    [Theory]
+    [InlineData(new[] { 50, 77 }, 33, 62)] // one 28 px line: 17 rows of margin on each side
+    [InlineData(new[] { 0, 27 }, 0, 45)] // text at the top edge stays at the edge
+    [InlineData(new[] { 10, 37, 46, 73 }, 0, 91)] // two lines; the margin comes from one line's height
+    public void Text_rows_get_a_margin_of_six_tenths_of_a_line(int[] runs, int top, int height)
+    {
+        var rows = new int[100];
+        for (int i = 0; i < runs.Length; i += 2)
+            for (int y = runs[i]; y <= runs[i + 1]; y++) rows[y] = 40;
+
+        Assert.Equal((top, height), SubtitleWatcher.TextRows(rows));
+    }
+
+    [Fact]
+    public void Without_text_rows_the_whole_strip_is_read() => Assert.Equal((0, 100), SubtitleWatcher.TextRows(new int[100]));
+
+    [Fact]
+    public void Once_one_reading_keeps_winning_only_it_is_recognized()
+    {
+        var h = new Harness();
+        var griffin = Line("Where is the griffin, Geralt?", 330, 340);
+
+        var counts = Enumerable.Range(0, 7).Select(_ => h.Show(griffin).Recognitions).ToList();
+        Assert.Equal([2, 2, 2, 2, 2, 1, 1], counts); // the mask won 5 times in a row (equal readings go to the mask)
+
+        var mill = Line("Out by the old mill, sir.", 320, 360);
+        Assert.Equal(2, h.Show(mill).Recognitions); // another line: both are read, and the mask wins again
+        Assert.Equal(1, h.Show(mill).Recognitions);
+    }
+
+    [Fact]
+    public void A_settled_reading_that_turns_worse_is_compared_with_the_other_again()
+    {
+        var h = new Harness();
+        var clean = Line("Where is the griffin, Geralt?", 330, 340);
+        for (int i = 0; i < 5; i++) h.Show(clean);
+        h.Ocr.MaskLines = [Line("Wh~re |s the gr@ff|n, Ger~lt?", 330, 340)]; // the mask loses the line over a bright patch
+
+        var result = h.Show(clean);
+
+        Assert.Equal(2, result.Recognitions);
+        Assert.Equal(clean.Text, result.Reading);
+        Assert.Equal(2, h.Show(clean).Recognitions); // the plain frame won: both are compared until one settles again
+    }
+
+    [Fact]
+    public void Reading_nothing_beside_white_scenery_never_leaves_the_plain_frame_unread()
+    {
+        // Snow in the region and no subtitle: both images read nothing, frame after frame. Then a subtitle the mask
+        // cannot read (white on snow, or another colour) appears: the plain frame must still be read.
+        var h = new Harness();
+        h.Ocr.MaskLines = [];
+        for (int i = 0; i < 2 * OcrSourcePolicy.WinsToSettle; i++) Assert.Equal(2, h.Show().Recognitions);
+
+        var line = Line("Where is the griffin, Geralt?", 330, 340);
+        var result = h.Show(line);
+
+        Assert.Equal(2, result.Recognitions);
+        Assert.Equal(line.Text, result.Reading);
+    }
+
+    [Fact]
+    public void A_settled_mask_reading_nothing_while_it_sees_white_is_checked_against_the_plain_frame()
+    {
+        var h = new Harness();
+        var griffin = Line("Where is the griffin, Geralt?", 330, 340);
+        for (int i = 0; i < OcrSourcePolicy.WinsToSettle + 1; i++) h.Show(griffin);
+        h.Ocr.MaskLines = [];
+
+        var result = h.Show(Line("Out by the old mill, sir.", 320, 360));
+
+        Assert.Equal(2, result.Recognitions);
+        Assert.Equal("Out by the old mill, sir.", result.Reading);
+    }
+
+    [Theory]
+    [InlineData("uams@Utothe")]
+    [InlineData("rn 1l ~ lI")]
+    public void Scene_noise_the_settled_image_adds_to_a_line_is_dropped_against_the_other_image(string noise)
+    {
+        // Read alone, the noise above the line would count as the line growing, and be translated as an update.
+        var h = new Harness();
+        var clean = Line("Where is the griffin, Geralt?", 330, 340);
+        for (int i = 0; i < OcrSourcePolicy.WinsToSettle + 1; i++) h.Show(clean);
+        h.Ocr.MaskLines = [clean, Line(noise, 230, 160, top: 4)];
+
+        var results = Enumerable.Range(0, 3).Select(_ => h.Show(clean)).ToList();
+
+        Assert.All(results, r => Assert.Equal(clean.Text, r.Reading));
+        Assert.All(results, r => Assert.Equal(2, r.Recognitions));
+        Assert.Equal([new RecordingSink.Detected(h.Id(1), clean.Text, false)], h.Sink.DetectedLines);
+    }
+
+    /// <summary>The white line of text, and one pale pixel of the scene leaking into the mask next to it at a place that moves.</summary>
+    static Bitmap Leaking(int frame)
+    {
+        var bmp = Strip(40, new Rectangle(350, 40, 300, 28));
+        bmp.SetPixel(360 + frame * 37 % 280, 39, Color.FromArgb(160, 160, 160));
+        return bmp;
+    }
+
+    /// <summary>The line with one letter misread, at a different letter in every frame: no two readings are alike.</summary>
+    static string Misread(string text, int frame)
+    {
+        var letters = Enumerable.Range(0, text.Length).Where(i => char.IsLetter(text[i])).ToList();
+        var chars = text.ToCharArray();
+        int at = letters[frame % letters.Count];
+        chars[at] = chars[at] == 'q' ? 'z' : 'q';
+        return new string(chars);
+    }
+
+    [Fact]
+    public async Task A_line_whose_readings_never_agree_is_read_about_once_a_second_after_its_first_readings()
+    {
+        // Bright pixels behind the text change the mask a little every frame, and OCR reads the line a little
+        // differently each time. A few extra readings may settle which is right; after that, more rarely do.
+        var h = new Harness();
+        const string text = "Where is the griffin, Geralt? Out by the old mill, sir.";
+        var readAt = new List<long>();
+        for (int i = 0; i < 24; i++)
+        {
+            h.Ocr.Lines = [Line(Misread(text, i), 300, 400)];
+            long now = h.Tick();
+            if ((await Process(h, Leaking(i), now)).OcrRan) readAt.Add(now);
+        }
+
+        Assert.True(readAt.Count(t => t <= 2_000) >= 5, $"read at {string.Join(", ", readAt)}"); // its first readings, at every change
+        double perSecond = readAt.Count(t => t > 2_000) / ((h.Now - 2_000) / 1000.0);
+        Assert.True(perSecond < 1.0, $"{perSecond:F2} OCR passes per second after the first two seconds; read at {string.Join(", ", readAt)}");
+        Assert.Single(h.Sink.DetectedLines);
+    }
+
+    [Theory]
+    [InlineData(OcrMode.Mask, 0, 2)]
+    [InlineData(OcrMode.Plain, 2, 0)]
+    public void The_ocr_mode_setting_reads_only_that_image(OcrMode mode, int plainCalls, int maskCalls)
+    {
+        var h = new Harness(mode: mode);
+        h.Show(Line("Where is the griffin?", 350, 300));
+        h.Show(Line("Out by the old mill, sir.", 320, 360));
+
+        Assert.Equal(plainCalls, h.Ocr.PlainCalls);
+        Assert.Equal(maskCalls, h.Ocr.MaskCalls);
+    }
+
+    [Fact]
+    public async Task In_mask_mode_a_frame_without_white_text_needs_no_ocr()
+    {
+        var h = new Harness(mode: OcrMode.Mask);
+        h.Ocr.Lines = [Line("Where is the griffin?", 350, 300)];
+
+        var first = await Process(h, Strip(30), 300);
+        var moved = await Process(h, Strip(90), 600);
+
+        Assert.Equal("", first.Reading);
+        Assert.Equal(0, h.Ocr.Calls);
+        Assert.False(moved.OcrRan);
+    }
+
+    [Fact]
+    public void A_game_going_to_the_background_clears_its_line_and_the_next_frame_is_read_fresh()
+    {
+        var h = new Harness();
+        var line = Line("Where is the griffin?", 350, 300);
+        h.Show(line);
+        h.Show(line);
+
+        h.Session.Pause(1_000);
+        var back = h.Repeat();
+
+        Assert.Contains("cleared", h.Sink.Events);
+        Assert.True(back.OcrRan);
+    }
+
+    [Fact]
+    public void A_line_still_on_screen_when_the_game_comes_back_is_not_reported_again()
+    {
+        // The game paused with the line on screen while the player read a wiki for a few seconds.
+        var h = new Harness();
+        var line = Line("Where is the griffin?", 350, 300);
+        h.Show(line);
+        h.Show(line);
+
+        h.Session.Pause(h.Now);
+        h.Wait(5_000);
+        for (int i = 0; i < 4; i++) h.Show(line);
+
+        Assert.Equal([new RecordingSink.Detected(h.Id(1), line.Text, false)], h.Sink.DetectedLines);
+        var mill = Line("Out by the old mill, sir.", 320, 360);
+        h.Show(mill);
+        Assert.IsType<SubtitleTracker.NewLine>(h.Show(mill).Event); // the next line is new as usual
     }
 
     // ---- translation ----

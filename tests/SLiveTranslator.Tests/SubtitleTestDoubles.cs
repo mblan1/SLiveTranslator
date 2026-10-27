@@ -50,6 +50,7 @@ sealed class RecordingSink : ISubtitleSink
     }
     public void LineFailed(int id, string original, string error) => Add(("failed", id, original));
     public void Cleared() => Add("cleared");
+    public void Paused(bool paused) => Add(paused ? "paused" : "resumed");
     public void Error(string message) => Add("error: " + message);
     public void Notice(string message) => Add("notice: " + message);
 
@@ -67,8 +68,9 @@ sealed class RecordingSink : ISubtitleSink
 }
 
 /// <summary>
-/// Returns the lines the test set. The watcher reads the plain frame first and the mask second, so every second
-/// call is the mask; it gets <see cref="MaskLines"/> when set.
+/// Returns the lines the test set. The watcher recognizes the frame and its white-text mask (dark text on white); a
+/// mask is told apart by its pure white centre pixel (test frames are never white there) and gets <see cref="MaskLines"/>
+/// when set.
 /// </summary>
 sealed class ScriptedOcr : IOcrEngine
 {
@@ -76,14 +78,19 @@ sealed class ScriptedOcr : IOcrEngine
     public IReadOnlyList<OcrLine>? MaskLines { get; set; }
     public Exception? Failure { get; set; }
     public int Calls { get; private set; }
+    public int MaskCalls { get; private set; }
+    public int PlainCalls => Calls - MaskCalls;
+    /// <summary>Size of every image recognized, in order.</summary>
+    public List<Size> Images { get; } = new();
     public string LanguageTag => "en-US";
-    int _reads; // successful calls: a failed plain read is followed by the plain read again
 
     public Task<IReadOnlyList<OcrLine>> RecognizeAsync(Bitmap image, CancellationToken ct, double maxUpscale = 2.0)
     {
         Calls++;
+        Images.Add(image.Size);
+        bool mask = image.GetPixel(image.Width / 2, image.Height / 2).ToArgb() == Color.White.ToArgb();
+        if (mask) MaskCalls++;
         if (Failure is { } failure) return Task.FromException<IReadOnlyList<OcrLine>>(failure);
-        bool mask = ++_reads % 2 == 0;
         return Task.FromResult(mask && MaskLines is { } m ? m : Lines);
     }
 }

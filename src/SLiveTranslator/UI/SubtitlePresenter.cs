@@ -1,6 +1,4 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Windows.Threading;
 using SLiveTranslator.Services;
 using DRect = System.Drawing.Rectangle;
@@ -13,36 +11,29 @@ namespace SLiveTranslator.UI;
 /// </summary>
 public sealed class SubtitlePresenter : ISubtitleSink
 {
-    const int VisibleLines = 3;
     const int HistoryLines = 12;
-    const int MaxEntries = 300;
     static readonly TimeSpan Linger = TimeSpan.FromSeconds(6);
-
-    sealed class Entry
-    {
-        public required int Id { get; init; }
-        public string Original { get; set; } = "";
-        public string? Translated { get; set; }
-    }
 
     readonly Dispatcher _ui;
     readonly OverlayWindow _overlay;
     readonly Func<DRect> _region;
     readonly Func<int> _fontSize;
+    readonly Func<int> _maxLines;
     readonly Func<string> _historyHotkey;
     readonly Action<string> _onError;
     readonly Action<string> _onNotice;
-    readonly List<Entry> _entries = new();
+    readonly SubtitleBoard _board = new();
     readonly DispatcherTimer _linger;
-    int _windowStart; // entries before this index belong to an earlier conversation and stay out of the subtitle box
+    bool _live; // the game shows a subtitle right now
 
-    public SubtitlePresenter(Dispatcher ui, OverlayWindow overlay, Func<DRect> region, Func<int> fontSize, Func<string> historyHotkey,
-        Action<string> onError, Action<string> onNotice)
+    public SubtitlePresenter(Dispatcher ui, OverlayWindow overlay, Func<DRect> region, Func<int> fontSize, Func<int> maxLines,
+        Func<string> historyHotkey, Action<string> onError, Action<string> onNotice)
     {
         _ui = ui;
         _overlay = overlay;
         _region = region;
         _fontSize = fontSize;
+        _maxLines = maxLines;
         _historyHotkey = historyHotkey;
         _onError = onError;
         _onNotice = onNotice;
@@ -50,20 +41,27 @@ public sealed class SubtitlePresenter : ISubtitleSink
         _linger.Tick += (_, _) =>
         {
             _linger.Stop();
-            _windowStart = _entries.Count;
+            _board.CloseWindow();
             _overlay.HideSubtitle();
         };
     }
 
     public bool HistoryVisible { get; private set; }
-    public int Count => _entries.Count;
+    public int Count => _board.Count;
 
-    public void Start() => _ui.Invoke(() => _windowStart = _entries.Count);
+    int VisibleLines => Math.Clamp(_maxLines(), 1, 5);
+
+    public void Start() => _ui.Invoke(() =>
+    {
+        _live = false;
+        _board.CloseWindow();
+    });
 
     public void Stop() => _ui.Invoke(() =>
     {
         _linger.Stop();
-        _windowStart = _entries.Count;
+        _live = false;
+        _board.CloseWindow();
         _overlay.HideSubtitle();
     });
 
@@ -83,39 +81,32 @@ public sealed class SubtitlePresenter : ISubtitleSink
 
     // ---- ISubtitleSink ----
 
-    public void LineDetected(int id, string original) => _ui.BeginInvoke(() =>
+    public void LineDetected(int id, string original, bool lowConfidence) => _ui.BeginInvoke(() =>
     {
-        var entry = Find(id);
-        if (entry is null)
-        {
-            entry = new Entry { Id = id };
-            _entries.Add(entry);
-            Trim();
-        }
-        entry.Original = original;
-        entry.Translated = null;
+        _board.Detected(id, original, lowConfidence);
+        _live = true;
         _linger.Stop();
         Render();
     });
 
-    public void LineTranslated(int id, string translated) => _ui.BeginInvoke(() =>
+    public void LineTranslated(int id, string translated, bool lowConfidence) => _ui.BeginInvoke(() =>
     {
-        if (Find(id) is not { } entry) return;
-        entry.Translated = translated;
+        // A translation that arrives after the box was hidden brings the box back for another linger.
+        if (_board.Translated(id, translated, lowConfidence, VisibleLines) && !_live) RestartLinger();
         Render();
     });
 
     public void LineFailed(int id, string original, string error) => _ui.BeginInvoke(() =>
     {
-        if (Find(id) is { } entry) entry.Translated = original; // show the original rather than "…" forever
+        _board.Failed(id);
         Render();
         _onError(error);
     });
 
     public void Cleared() => _ui.BeginInvoke(() =>
     {
-        _linger.Stop();
-        _linger.Start(); // keep the last lines readable for a few seconds after the game hides them
+        _live = false;
+        RestartLinger(); // keep the last lines readable for a few seconds after the game hides them
     });
 
     public void Error(string message) => _ui.BeginInvoke(() => _onError(message));
@@ -124,34 +115,18 @@ public sealed class SubtitlePresenter : ISubtitleSink
 
     // ---- rendering ----
 
-    Entry? Find(int id)
+    void RestartLinger()
     {
-        for (int i = _entries.Count - 1; i >= 0; i--)
-            if (_entries[i].Id == id) return _entries[i];
-        return null;
-    }
-
-    void Trim()
-    {
-        if (_entries.Count <= MaxEntries) return;
-        int drop = _entries.Count - MaxEntries;
-        _entries.RemoveRange(0, drop);
-        _windowStart = Math.Max(0, _windowStart - drop);
+        _linger.Stop();
+        _linger.Start();
     }
 
     void Render()
     {
-        int from = Math.Max(Math.Min(_windowStart, _entries.Count), _entries.Count - VisibleLines);
-        var visible = _entries.Skip(from).Select(e => new SubtitleLineView(e.Translated ?? "…", e.Translated is null)).ToList();
-        _overlay.ShowSubtitleLines(visible, _region(), _fontSize());
+        _overlay.ShowSubtitleLines(_board.Visible(VisibleLines), _region(), _fontSize());
         if (HistoryVisible) RenderHistory();
     }
 
-    void RenderHistory()
-    {
-        var lines = _entries.Skip(Math.Max(0, _entries.Count - HistoryLines))
-            .Select(e => new HistoryLineView(e.Translated ?? "", e.Original, e.Translated is null))
-            .ToList();
-        _overlay.ShowHistory($"Dialog history ({_entries.Count} lines)  ·  {_historyHotkey()} to close", lines, _region());
-    }
+    void RenderHistory() =>
+        _overlay.ShowHistory($"Dialog history ({_board.Count} lines)  ·  {_historyHotkey()} to close", _board.History(HistoryLines), _region());
 }

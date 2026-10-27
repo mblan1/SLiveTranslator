@@ -13,7 +13,10 @@ namespace SLiveTranslator.UI;
 
 public enum StatusKind { Info, On, Off, Warning, Error }
 
-public sealed record SubtitleLineView(string Text, bool Pending);
+/// <param name="Pending">The translation is not there yet (the text is a placeholder).</param>
+/// <param name="Failed">Not translated: the text is the original, shown dimmed.</param>
+/// <param name="LowConfidence">OCR never read the line cleanly; shown in italics.</param>
+public sealed record SubtitleLineView(string Text, bool Pending, bool Failed = false, bool LowConfidence = false);
 
 public sealed record HistoryLineView(string Translated, string Original, bool Pending);
 
@@ -113,8 +116,8 @@ public partial class OverlayWindow : Window
             {
                 Text = lines[i].Text,
                 FontSize = newest ? fontSize : Math.Max(10, fontSize * 0.82),
-                Foreground = lines[i].Pending ? PendingBrush : Brushes.White,
-                FontStyle = lines[i].Pending ? FontStyles.Italic : FontStyles.Normal,
+                Foreground = lines[i].Pending ? PendingBrush : lines[i].Failed ? OriginalBrush : Brushes.White,
+                FontStyle = lines[i].Pending || lines[i].LowConfidence ? FontStyles.Italic : FontStyles.Normal,
                 Opacity = newest ? 1.0 : 0.62,
                 FontFamily = new FontFamily("Segoe UI"),
                 FontWeight = FontWeights.SemiBold,

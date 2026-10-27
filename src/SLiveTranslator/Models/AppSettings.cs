@@ -54,6 +54,12 @@ public sealed class SubtitleSettings : SettingsSection
     public bool PauseWhenGameUnfocused { get; set; } = true;
     public OcrMode OcrMode { get; set; } = OcrMode.Auto;
 
+    /// <summary>
+    /// Largest gap between two lines of one subtitle, in line heights (0.7 to 2.5); a wider gap starts a new text
+    /// block, translated on its own. Raise it if the game spaces its subtitle lines wider and sentences come out split.
+    /// </summary>
+    public double ParagraphGapRatio { get; set; } = 1.3;
+
     /// <summary>Runs the subtitle loop at below-normal priority.</summary>
     public bool LowImpact { get; set; }
 }

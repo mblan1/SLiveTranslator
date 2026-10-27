@@ -21,6 +21,12 @@ public class ReadingComparisonTests
         { "Why the hell not?kThe whippersnapper rejuses todo as she's told.", "•Why:the hell not? The whippersnapper refuses to do as shelstold.n" },
         { "Take a trophy from the griffin's corpse.", "Take a trophy from the griffin's corpse. @" },
         { "Now I see why,you were so eager to practice.tStrike!", "Now I see why, you were so eager to practice. Strike!" },
+        // Typical Windows OCR slips on short lines: h/n, i/l, m/rn, w/vv, g/q, a merged word.
+        { "Where is the griffin?", "Wnere Is tne griffln?" },
+        { "Tell me about the Wild Hunt.", "Tell rne about the Wlld Hunt" },
+        { "Vesemir taught me everything.", "Vesernir tauqht me everythinq." },
+        { "Get down from there!", "Get dovvn from there!" },
+        { "But you were asleep, Uncle Vesemir.", "But you weretaßleep/Uncle Vesemir." },
     };
 
     [Theory]
@@ -35,6 +41,16 @@ public class ReadingComparisonTests
         { "1. Wanna stay with you a little longer.", "3. You're right. I should go see Ciri." },
         { "Sorry's not good enough.", "Anything to say for yourself, young lady?" },
         { "The griffin has been hunting here.", "The griffin has been hunting here. We must stop it before nightfall, or more will die." },
+        // Most of the line is shared, but one clean word differs on each side.
+        { "Where is Yennefer?", "Where is Ciri?" },
+        { "Yes, I'm sure.", "No, I'm sure." },
+        { "What do you want?", "What do you need?" },
+        { "I'll go with you.", "I won't go with you." },
+        { "Tell me about Ciri.", "Tell me about Yennefer." },
+        { "I need to find Ciri before the Wild Hunt does.", "I need to find Yennefer before the Wild Hunt does." },
+        { "Geralt, the griffin is in the hills.", "Geralt, the wyvern is in the hills." },
+        { "We ride at dawn.", "We ride at dusk." },
+        { "Thank you, Geralt.", "Thank you, Vesemir." },
     };
 
     [Theory]

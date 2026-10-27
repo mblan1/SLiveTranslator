@@ -84,11 +84,11 @@ public partial class App : Application
         _overlay.Show();
 
         _presenter = new SubtitlePresenter(Dispatcher, _overlay, () => _subtitles?.Region ?? default, () => _settings.Overlay.FontSize,
-            () => Hotkey(HotkeyAction.History), ShowError,
+            () => _settings.Overlay.MaxLines, () => Hotkey(HotkeyAction.History), ShowError,
             notice => _overlay.ShowStatus($"{notice} Press {Hotkey(HotkeyAction.SelectRegion)}.", StatusKind.Warning, _subtitles?.Region, 8));
         _screenTranslator = new ScreenTranslator(() => _ocr!, () => _translator!, Langs);
         _subtitles = new SubtitleWatcher(() => _ocr!, () => _translator!,
-            () => (Langs().Src, Langs().Tgt, _settings.Subtitles.IntervalMs), _presenter);
+            () => (Langs().Src, Langs().Tgt, _settings.Subtitles.IntervalMs, _settings.Subtitles.ParagraphGapRatio), _presenter);
 
         _clearTimer = new DispatcherTimer();
         _clearTimer.Tick += (_, _) =>

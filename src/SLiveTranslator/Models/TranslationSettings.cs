@@ -73,8 +73,6 @@ public enum LlmEffort { Low, Medium }
 
 public sealed class ClaudeProviderSettings : ProviderSettings
 {
-    public ClaudeProviderSettings() => Model = "claude-opus-5-5";
-
     public LlmEffort Effort { get; set; } = LlmEffort.Low;
 }
 
@@ -88,6 +86,9 @@ public sealed class CompatProviderSettings : ProviderSettings
 {
     /// <summary>e.g. "https://openrouter.ai/api/v1" or "http://localhost:11434/v1".</summary>
     public string BaseUrl { get; set; } = "";
+
+    /// <summary>The preset the base URL came from ("openrouter", "ollama", …), for the settings page; "" for an address typed by hand.</summary>
+    public string Preset { get; set; } = "";
 }
 
 public sealed class AzureProviderSettings : ProviderSettings

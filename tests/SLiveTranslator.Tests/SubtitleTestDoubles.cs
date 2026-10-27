@@ -153,6 +153,13 @@ sealed class GatedTranslator : ITranslator
         answer.SetResult(text.Split('\n').Select(t => "vi:" + t).ToList());
     }
 
+    /// <summary>Answers the request with this index with "" for each of its lines, as an LLM does for noise.</summary>
+    public void AnswerEmpty(int index)
+    {
+        (string text, var answer) = Request(index);
+        answer.SetResult(text.Split('\n').Select(_ => "").ToList());
+    }
+
     (string, TaskCompletionSource<IReadOnlyList<string>>) Request(int index)
     {
         lock (_gate) return _requests[index];

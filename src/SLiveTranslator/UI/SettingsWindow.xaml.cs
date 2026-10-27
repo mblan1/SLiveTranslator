@@ -4,6 +4,7 @@ using System.Windows;
 using SLiveTranslator.Hotkeys;
 using SLiveTranslator.Models;
 using SLiveTranslator.Ocr;
+using SLiveTranslator.Translation.Providers;
 using DRect = System.Drawing.Rectangle;
 
 namespace SLiveTranslator.UI;
@@ -14,6 +15,7 @@ public partial class SettingsWindow : Window
     readonly Func<DRect?> _selectRegion;
     readonly Action _save;
     bool _claudeKeyEdited;
+    bool _providerPicked;
 
     sealed record LanguageItem(string Tag, string Label)
     {
@@ -28,6 +30,7 @@ public partial class SettingsWindow : Window
         _save = save;
         Populate();
         ClaudeKey.PasswordChanged += (_, _) => _claudeKeyEdited = true;
+        Provider.SelectionChanged += (_, _) => _providerPicked = true;
     }
 
     void Populate()
@@ -46,7 +49,8 @@ public partial class SettingsWindow : Window
         ClaudeKey.Password = translation.Claude.ApiKey;
         if (translation.Claude.ApiKeyUnreadable)
             ClaudeKey.ToolTip = "The saved key cannot be decrypted on this Windows account. Enter it again, or leave the box empty to remove it.";
-        ClaudeModel.Text = translation.Claude.Model;
+        // This window has no key check or model list (the settings page will): it offers the model a check pre-selects.
+        ClaudeModel.Text = translation.Claude.Model.Trim() is { Length: > 0 } model ? model : ClaudeProvider.RecommendedModel;
         Interval.Text = _settings.Subtitles.IntervalMs.ToString();
         FontSizeBox.Text = _settings.Overlay.FontSize.ToString();
         OverlaySeconds.Text = _settings.Overlay.LabelSeconds.ToString();
@@ -103,7 +107,9 @@ public partial class SettingsWindow : Window
         _settings.General.OcrLanguage = (OcrLang.SelectedItem as LanguageItem)?.Tag ?? "";
         _settings.General.TargetLanguage = string.IsNullOrWhiteSpace(TargetLang.Text) ? "en" : TargetLang.Text.Trim();
         var translation = _settings.Translation;
-        translation.Provider = Provider.SelectedIndex == 1 ? ProviderIds.Claude : ProviderIds.Free;
+        // This window offers only Free and Claude: another provider (set by hand or on the settings page) shows as Free
+        // and stays selected unless the user picks one here.
+        if (_providerPicked) translation.Provider = Provider.SelectedIndex == 1 ? ProviderIds.Claude : ProviderIds.Free;
         translation.Free.MyMemoryEmail = MyMemoryEmail.Text.Trim();
         // Only an edited key is stored: a key this Windows account cannot decrypt shows as empty and survives an
         // unrelated save, while emptying the box on purpose removes it.

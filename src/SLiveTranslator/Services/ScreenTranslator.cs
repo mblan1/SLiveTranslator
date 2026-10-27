@@ -62,11 +62,11 @@ public sealed class ScreenTranslator
             try
             {
                 var request = new TranslateRequest(chunk.Select(p => p.Text).ToList(), src, tgt, Array.Empty<ContextLine>(), profile);
-                var translated = (await _translator().TranslateAsync(request, ct)).Texts;
+                var result = await _translator().TranslateAsync(request, ct);
                 IReadOnlyList<Item> snapshot;
                 lock (done)
                 {
-                    for (int i = 0; i < chunk.Count; i++) done.Add(new Item(chunk[i], translated[i]));
+                    done.AddRange(Labels(chunk, result));
                     snapshot = done.ToList();
                 }
                 progress?.Invoke(snapshot);
@@ -78,6 +78,15 @@ public sealed class ScreenTranslator
         }));
         return done;
     }
+
+    /// <summary>
+    /// The labels of a translated chunk. A paragraph an LLM found not to be language comes back empty, and one no
+    /// service could translate comes back as its source (<see cref="TranslateResult.FailedLines"/>): neither gets a label.
+    /// </summary>
+    internal static IEnumerable<Item> Labels(IReadOnlyList<OcrLine> chunk, TranslateResult result) =>
+        Enumerable.Range(0, chunk.Count)
+            .Where(i => !string.IsNullOrWhiteSpace(result.Texts[i]) && result.FailedLines?.Contains(i) != true)
+            .Select(i => new Item(chunk[i], result.Texts[i]));
 
     /// <summary>A small first batch so the nearest text shows up fast, then bigger batches.</summary>
     static IEnumerable<List<OcrLine>> Chunks(List<OcrLine> items)

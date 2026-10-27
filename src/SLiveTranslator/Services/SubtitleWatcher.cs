@@ -24,6 +24,7 @@ public interface ISubtitleSink
     /// A translation of the line. It may be of an earlier reading when the line grew meanwhile (shown until the
     /// newer one arrives); <paramref name="lowConfidence"/> belongs to the reading that was translated.
     /// </summary>
+    /// <param name="translated">Empty when no part of the line is language (an LLM found only OCR noise): the line is dropped.</param>
     /// <param name="provider">The provider key the translation came from (<see cref="ProviderKeys"/>); "user" for a hand fix.</param>
     void LineTranslated(int id, string translated, bool lowConfidence, string provider);
     /// <summary>Translating the line failed; it is retried once, so a translation may still follow.</summary>
@@ -535,9 +536,9 @@ public sealed class SubtitleWatcher : IDisposable
                 {
                     var (translated, provider) = await TranslateAsync(job, ct);
                     // An earlier reading's translation is still shown until the newer one arrives, never after it.
-                    if (MarkDelivered(state, version))
+                    if (MarkDelivered(state, version, translated.Length == 0 ? text : null))
                     {
-                        _context.Shown(id, text, translated);
+                        if (translated.Length > 0) _context.Shown(id, text, translated); // noise is no part of the conversation
                         _sink.LineTranslated(id, translated, lowConfidence, provider);
                     }
                     return;
@@ -561,11 +562,13 @@ public sealed class SubtitleWatcher : IDisposable
         }
     }
 
-    static bool MarkDelivered(LineState state, int version)
+    /// <param name="empty">The reading whose answer is empty (not language), which drops the line: only while the line
+    /// still shows it, not once it has grown into a reading that waits for its own answer. Null for a translation.</param>
+    static bool MarkDelivered(LineState state, int version, string? empty)
     {
         lock (state)
         {
-            if (version <= state.Delivered) return false;
+            if (version <= state.Delivered || (empty is not null && state.Text != empty)) return false;
             state.Delivered = version;
             return true;
         }
@@ -582,7 +585,12 @@ public sealed class SubtitleWatcher : IDisposable
             var translator = _translator();
             var request = new TranslateRequest(job.Text.Split('\n'), job.Src, job.Tgt, _context.Before(job.Id, job.ContextLines), job.Profile);
             var result = await translator.TranslateAsync(request, ct);
-            return (string.Join("\n", result.Texts), result.Provider ?? translator.Name);
+            // A line no service could translate comes back as its source text: the subtitle failed and is tried again
+            // (the lines that were answered come from the cache then), it is not shown as translated.
+            if (result.FailedLines is { Count: > 0 })
+                throw new TranslatorUnavailableException($"{result.Provider ?? translator.Name} could not translate every line of the subtitle.");
+            // A text line an LLM found not to be language comes back empty and is dropped.
+            return (string.Join("\n", result.Texts.Where(t => !string.IsNullOrWhiteSpace(t))), result.Provider ?? translator.Name);
         }
         finally
         {

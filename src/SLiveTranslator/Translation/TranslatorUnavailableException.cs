@@ -11,6 +11,12 @@ public sealed class TranslatorUnavailableException(string message, TimeSpan? ret
     public TimeSpan? RetryAfter { get; } = retryAfter;
 
     /// <summary>
+    /// The service declined this text only (a refusal, an answer cut off at its length limit) and works for the next
+    /// one: the next service translates it, and no outage is reported.
+    /// </summary>
+    public bool AboutText { get; init; }
+
+    /// <summary>
     /// The service cannot answer now (refused, paused, unreachable, timed out), as opposed to a request no service can
     /// answer (a bad language code): another service, or an earlier answer, may stand in.
     /// </summary>

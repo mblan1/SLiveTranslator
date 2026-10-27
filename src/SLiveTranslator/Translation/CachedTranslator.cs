@@ -22,8 +22,9 @@ namespace SLiveTranslator.Translation;
 /// parts its translation depended on (<see cref="ITranslator.ProfileStamp"/>); an entry whose stamp differs from the
 /// one the profile gives the line now counts as missing, so a profile edit re-translates only the lines it can change.
 /// While nothing can translate such a line, its earlier translation answers. Empty answers, answers that only repeat
-/// the source, and MyMemory corpus matches are never kept; an answer that repeats its source ("Hm.") is remembered
-/// until the app exits instead, so the line is not sent again meanwhile.
+/// the source, lines the engine left unanswered (<see cref="TranslateResult.FailedLines"/>) and MyMemory corpus
+/// matches are never kept; an answer that repeats its source ("Hm.") and an LLM's empty answer (the line is not
+/// language) are remembered until the app exits instead, so the line is not sent again meanwhile.
 /// </para>
 /// <para>
 /// In a chain of providers each member keeps its own entries: the cache looks up the first one, and each later one is
@@ -48,8 +49,8 @@ public sealed class CachedTranslator : ITranslator
     const int FileVersion = 2;
     const string LegacyFreeKey = "free";
 
-    /// <summary>Answers that repeat their source remembered at most; the memo starts again when full.</summary>
-    const int MaxSameAsSource = 2_000;
+    /// <summary>Answers remembered for the run at most (see <see cref="Keep"/>); the memo starts again when full.</summary>
+    const int MaxRunAnswers = 2_000;
 
     static readonly TimeSpan DefaultSaveDelay = TimeSpan.FromSeconds(30);
 
@@ -87,7 +88,7 @@ public sealed class CachedTranslator : ITranslator
     readonly TimeSpan _saveDelay;
     readonly TimeProvider _time;
     readonly ConcurrentDictionary<EntryKey, Entry> _cache = new();
-    readonly ConcurrentDictionary<(EntryKey Key, string Stamp), byte> _sameAsSource = new();
+    readonly ConcurrentDictionary<(EntryKey Key, string Stamp), string> _runAnswers = new();
     readonly Task _loaded;
     readonly object _saveGate = new();
     volatile ITranslator _inner;
@@ -191,9 +192,9 @@ public sealed class CachedTranslator : ITranslator
                 Touch(entry, now);
                 (texts[i], answeredBy[i], providers[i]) = (entry.Translation, AnsweredFromCache, entry.Provider);
             }
-            else if (_sameAsSource.ContainsKey((new EntryKey(key, request.Src, request.Tgt, source), stamps[i])))
+            else if (_runAnswers.TryGetValue((new EntryKey(key, request.Src, request.Tgt, source), stamps[i]), out string? answer))
             {
-                (texts[i], answeredBy[i], providers[i]) = (source, AnsweredFromCache, key);
+                (texts[i], answeredBy[i], providers[i]) = (answer, AnsweredFromCache, key);
             }
             else
             {
@@ -221,15 +222,15 @@ public sealed class CachedTranslator : ITranslator
             return new TranslateResult(texts, null, AnsweredFromCache) { Provider = providers[0], LineAnsweredBy = answeredBy };
         }
 
-        string provider = result.Provider ?? key;
         bool added = false;
+        bool judged = result.FixedSources is not null;
         for (int j = 0; j < missing.Count; j++)
         {
             int i = missing[j];
-            (texts[i], answeredBy[i], providers[i]) = (result.Texts[j], result.AnsweredByAt(j), provider);
-            // Another member's bucket kept (or answered) it.
-            if (provider == key && answeredBy[i] != AnsweredFromCache)
-                added |= Keep(new EntryKey(key, request.Src, request.Tgt, lines[i].Trim()), texts[i], answeredBy[i], stamps[i], request.Profile?.Version ?? 0, now);
+            (texts[i], answeredBy[i], providers[i]) = (result.Texts[j], result.AnsweredByAt(j), result.ProviderAt(j) ?? key);
+            // Another member's bucket kept (or answered) it; a failed line has no answer to keep.
+            if (providers[i] == key && answeredBy[i] != AnsweredFromCache && result.FailedLines?.Contains(j) != true)
+                added |= Keep(new EntryKey(key, request.Src, request.Tgt, lines[i].Trim()), texts[i], answeredBy[i], stamps[i], request.Profile?.Version ?? 0, now, judged);
         }
         // Only new entries are worth a write; the order the hits changed goes along with it.
         if (added) MarkDirty();
@@ -240,18 +241,29 @@ public sealed class CachedTranslator : ITranslator
             fixedSources = lines.ToArray();
             for (int j = 0; j < missing.Count && j < sources.Count; j++) fixedSources[missing[j]] = sources[j];
         }
-        return new TranslateResult(texts, fixedSources, result.AnsweredBy) { Provider = providers[0], LineAnsweredBy = answeredBy };
+        return new TranslateResult(texts, fixedSources, result.AnsweredBy)
+        {
+            Provider = providers[0], LineAnsweredBy = answeredBy, FailedLines = result.FailedLines?.Select(j => missing[j]).ToList(),
+        };
     }
 
+    /// <summary>
+    /// Keeps a real translation. Two answers that are not kept are remembered for the run instead, so the line is not
+    /// sent again meanwhile: one that repeats its source ("Hm."), and an empty one from an engine that judges each
+    /// line (an LLM, which reports the fixed sources), whose "" says the line is not language. Any other empty answer
+    /// is a failure that a later try may not repeat.
+    /// </summary>
+    /// <param name="judged">The answer came with <see cref="TranslateResult.FixedSources"/>.</param>
     /// <returns>Whether an entry was added.</returns>
-    bool Keep(EntryKey key, string translation, string answeredBy, string stamp, int profileVersion, long now)
+    bool Keep(EntryKey key, string translation, string answeredBy, string stamp, int profileVersion, long now, bool judged)
     {
         if (!Keepable(key.Source, translation, answeredBy))
         {
-            if (translation.Trim() == key.Source && answeredBy != MyMemoryTranslator.AnsweredByCorpus)
+            string text = translation.Trim();
+            if (answeredBy != MyMemoryTranslator.AnsweredByCorpus && (text == key.Source || (judged && text.Length == 0)))
             {
-                if (_sameAsSource.Count >= MaxSameAsSource) _sameAsSource.Clear();
-                _sameAsSource[(key, stamp)] = 0;
+                if (_runAnswers.Count >= MaxRunAnswers) _runAnswers.Clear();
+                _runAnswers[(key, stamp)] = text;
             }
             return false;
         }
@@ -359,7 +371,7 @@ public sealed class CachedTranslator : ITranslator
         int removed = 0;
         foreach (var pair in _cache)
             if (goes(pair.Value) && _cache.TryRemove(pair)) removed++;
-        _sameAsSource.Clear();
+        _runAnswers.Clear();
         if (removed > 0) MarkDirty();
         return removed;
     }

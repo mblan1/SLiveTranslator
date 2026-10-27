@@ -13,7 +13,11 @@ namespace SLiveTranslator.Translation;
 /// (LLMs) get the profile in their <see cref="TranslateRequest"/> instead and are not wrapped. Such engines fix no OCR
 /// errors, so the result has no <see cref="TranslateResult.FixedSources"/>.
 /// </summary>
-public sealed class ProfileTranslator(ITranslator inner) : ITranslator
+/// <param name="placeholders">
+/// False for an engine with markup of its own for names (DeepL ignore tags, Azure dictionary): it gets the lines as
+/// they are with the profile, and marks the keep entries itself.
+/// </param>
+public sealed class ProfileTranslator(ITranslator inner, bool placeholders = true) : ITranslator
 {
     /// <summary><see cref="TranslateResult.AnsweredBy"/> of a line that is its own translation: kept names, digits, punctuation.</summary>
     public const string AnsweredByProfile = "profile";
@@ -39,8 +43,9 @@ public sealed class ProfileTranslator(ITranslator inner) : ITranslator
         }
         if (sent.Count == 0) return new TranslateResult(texts, null, AnsweredByProfile) { LineAnsweredBy = answeredBy };
 
-        // The inner engine gets no profile: it is applied here.
-        var first = await inner.TranslateAsync(request with { Lines = sent.Select(i => shielded[i].Text).ToList(), Profile = null }, ct);
+        // An engine without markup of its own gets no profile: it is applied here.
+        if (!placeholders) shielded = lines.Select(l => new ShieldedLine(l, [])).ToList();
+        var first = await inner.TranslateAsync(request with { Lines = sent.Select(i => shielded[i].Text).ToList(), Profile = placeholders ? null : profile }, ct);
         var lost = new List<int>();
         for (int j = 0; j < sent.Count; j++)
         {

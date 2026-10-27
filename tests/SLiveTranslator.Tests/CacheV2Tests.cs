@@ -375,6 +375,67 @@ public class CacheV2Tests
         Assert.Equal("claude/claude-opus-5-5", cache.Snapshot().Single().Provider);
     }
 
+    /// <summary>
+    /// Answers as an LLM does (with the fixed sources): the text the test sets for each line, where null leaves the
+    /// line out of the answer (a failed line, its text the source).
+    /// </summary>
+    sealed class Llm(string name, Func<string, string?> answer) : ITranslator
+    {
+        public List<string> Asked { get; } = new();
+        public string Name => name;
+
+        public Task<IReadOnlyList<string>> TranslateAsync(IReadOnlyList<string> texts, string sourceLang, string targetLang, CancellationToken ct) =>
+            throw new InvalidOperationException("the cache sends requests");
+
+        public Task<TranslateResult> TranslateAsync(TranslateRequest request, CancellationToken ct)
+        {
+            Asked.AddRange(request.Lines);
+            var answers = request.Lines.Select(answer).ToList();
+            var failed = Enumerable.Range(0, answers.Count).Where(i => answers[i] is null).ToList();
+            return Task.FromResult(new TranslateResult(answers.Select((a, i) => a ?? request.Lines[i]).ToList(), request.Lines, name)
+            {
+                FailedLines = failed.Count > 0 ? failed : null,
+            });
+        }
+    }
+
+    [Fact]
+    public async Task A_line_the_llm_left_out_is_neither_kept_nor_remembered_and_its_index_is_the_request_s()
+    {
+        using var dir = new TempDir();
+        var llm = new Llm("claude/x", line => line == "Wolven Storm" ? null : "llm:" + line);
+        var cache = Cache(dir, llm);
+        await Translate(cache, null, "Ciri!");
+
+        var result = await Translate(cache, null, "Ciri!", "Wolven Storm", "Geralt.");
+        var again = await Translate(cache, null, "Wolven Storm");
+        cache.Flush();
+
+        Assert.Equal(["llm:Ciri!", "Wolven Storm", "llm:Geralt."], result.Texts);
+        Assert.Equal([1], result.FailedLines); // the line's place in this request, though the first came from the cache
+        Assert.Equal(["Ciri!", "Wolven Storm", "Geralt.", "Wolven Storm"], llm.Asked); // asked again: it is no answer that repeats its source
+        Assert.Equal([0], again.FailedLines);
+        Assert.Equal(["claude/x|en|vi|Ciri!", "claude/x|en|vi|Geralt."], CachedTranslatorTests.FileKeys(dir));
+    }
+
+    [Fact]
+    public async Task An_llm_s_not_language_answer_is_not_kept_on_disk_but_is_not_asked_for_again_this_run()
+    {
+        // "Ilrn ooe" is OCR noise; asking again only costs another paid call with the same verdict.
+        using var dir = new TempDir();
+        var llm = new Llm("claude/x", line => line == "Ilrn ooe" ? "" : "llm:" + line);
+        var cache = Cache(dir, llm);
+
+        Assert.Equal(["", "llm:Hm."], (await Translate(cache, null, "Ilrn ooe", "Hm.")).Texts);
+        var again = await Translate(cache, null, "Ilrn ooe");
+        cache.Flush();
+
+        Assert.Equal([""], again.Texts);
+        Assert.Equal(CachedTranslator.AnsweredFromCache, again.AnsweredByAt(0));
+        Assert.Equal(["Ilrn ooe", "Hm."], llm.Asked);
+        Assert.Equal(["claude/x|en|vi|Hm."], CachedTranslatorTests.FileKeys(dir));
+    }
+
     [Fact]
     public async Task The_cache_manager_lists_filters_and_counts_entries()
     {

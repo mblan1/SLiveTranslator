@@ -15,7 +15,10 @@ namespace SLiveTranslator.Tests;
 /// <summary>The conversation sent along with each subtitle line, and the game profile that goes with it.</summary>
 public class SubtitleContextTests
 {
-    /// <summary>Records every request and answers "vi:" plus each line.</summary>
+    /// <summary>OCR noise an LLM answers "" for: it is not language.</summary>
+    const string Noise = "Ilrn ooe";
+
+    /// <summary>Records every request and answers "vi:" plus each line, or "" for <see cref="Noise"/>, as an LLM does.</summary>
     sealed class RequestRecorder : ITranslator
     {
         readonly object _gate = new();
@@ -34,7 +37,7 @@ public class SubtitleContextTests
         public Task<TranslateResult> TranslateAsync(TranslateRequest request, CancellationToken ct)
         {
             lock (_gate) _requests.Add(request);
-            return Task.FromResult(new TranslateResult(request.Lines.Select(l => "vi:" + l).ToList(), null, "google") { Provider = "free-mt" });
+            return Task.FromResult(new TranslateResult(request.Lines.Select(l => l == Noise ? "" : "vi:" + l).ToList(), null, "google") { Provider = "free-mt" });
         }
     }
 
@@ -109,6 +112,23 @@ public class SubtitleContextTests
         h.Now += 60_001;
         Assert.Empty(h.Line(3, "Where is the griffin?").Context);
         Assert.Single(h.Line(4, "Out by the old mill.").Context);
+    }
+
+    [Fact]
+    public void A_line_that_is_not_language_is_dropped_and_is_no_context()
+    {
+        var h = new Harness();
+        h.Line(1, Noise);
+        h.Line(2, "Ciri, get down here!\n" + Noise); // a block of two text lines, one of them noise
+        var next = h.Line(3, "Coming!");
+
+        Assert.Equal(
+        [
+            ("translated", 1_000_001, ""), // the board drops the line
+            ("translated", 1_000_002, "vi:Ciri, get down here!"),
+            ("translated", 1_000_003, "vi:Coming!"),
+        ], h.Sink.Events.Where(e => e is ValueTuple<string, int, string>));
+        Assert.Equal(["vi:Ciri, get down here!"], next.Context.Select(c => c.Translation));
     }
 
     [Fact]

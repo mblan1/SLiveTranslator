@@ -33,5 +33,19 @@ public sealed record TranslateResult(IReadOnlyList<string> Texts, IReadOnlyList<
     /// </summary>
     public IReadOnlyList<string>? LineAnsweredBy { get; init; }
 
+    /// <summary>
+    /// The provider key of each line's answer, when a chain merged the answers of several providers (see
+    /// <see cref="FailedLines"/>); null when <see cref="Provider"/> holds for every line.
+    /// </summary>
+    public IReadOnlyList<string>? LineProviders { get; init; }
+
+    /// <summary>
+    /// Lines the engine gave no answer for (an LLM's answer left them out); their text is the source line. A chain
+    /// asks its next service for them, and the cache keeps none of them. Null when every line was answered.
+    /// </summary>
+    public IReadOnlyList<int>? FailedLines { get; init; }
+
     public string AnsweredByAt(int line) => LineAnsweredBy is { } lines && line < lines.Count ? lines[line] : AnsweredBy;
+
+    public string? ProviderAt(int line) => LineProviders is { } providers && line < providers.Count ? providers[line] : Provider;
 }

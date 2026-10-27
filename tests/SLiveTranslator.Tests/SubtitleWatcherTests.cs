@@ -805,6 +805,73 @@ public class SubtitleWatcherTests
     }
 
     [Fact]
+    public void An_earlier_reading_found_to_be_noise_does_not_drop_the_line_it_grew_into()
+    {
+        var gated = new GatedTranslator();
+        var h = new Harness(translator: gated);
+
+        h.Watcher.Emit(1, 1, "Ilrn oo", false, update: false, CancellationToken.None); // a line fading in, read as garbage
+        h.Watcher.Emit(1, 1, "I learned one thing.", false, update: true, CancellationToken.None);
+        Assert.True(h.Sink.WaitFor(_ => gated.Count == 2));
+        gated.AnswerEmpty(0);
+        Thread.Sleep(50);
+        gated.Answer(1);
+        Assert.True(h.Sink.WaitFor(e => e.Any(IsTranslated)));
+        Thread.Sleep(50);
+
+        // An empty translation would take the line out of the box, and the one it grew into would find nothing to fill.
+        Assert.Equal([("translated", 1_000_001, "vi:I learned one thing.")], h.Sink.Events.Where(IsTranslated));
+    }
+
+    [Fact]
+    public void Noise_the_line_still_shows_is_dropped()
+    {
+        var gated = new GatedTranslator();
+        var h = new Harness(translator: gated);
+
+        h.Watcher.Emit(1, 1, "Xq zzv", true, update: false, CancellationToken.None);
+        h.Watcher.Emit(1, 1, "Xq zzv", false, update: true, CancellationToken.None); // only the flag changed: not sent again
+        Assert.True(h.Sink.WaitFor(_ => gated.Count == 1));
+        gated.AnswerEmpty(0);
+
+        Assert.True(h.Sink.WaitFor(e => e.Contains(("translated", 1_000_001, ""))));
+    }
+
+    /// <summary>An LLM whose first answer leaves the last line out, when nothing after it could translate that line either.</summary>
+    sealed class LeavesOutLastLineOnce : ITranslator
+    {
+        int _calls;
+        public string Name => "claude/x";
+
+        public Task<IReadOnlyList<string>> TranslateAsync(IReadOnlyList<string> texts, string sourceLang, string targetLang, CancellationToken ct) =>
+            throw new InvalidOperationException();
+
+        public Task<TranslateResult> TranslateAsync(TranslateRequest request, CancellationToken ct)
+        {
+            bool first = Interlocked.Increment(ref _calls) == 1;
+            int last = request.Lines.Count - 1;
+            var texts = request.Lines.Select((l, i) => first && i == last ? l : "vi:" + l).ToList();
+            return Task.FromResult(new TranslateResult(texts, request.Lines, Name) { FailedLines = first ? [last] : null });
+        }
+    }
+
+    [Fact]
+    public void A_subtitle_with_a_line_no_service_translated_fails_and_is_retried_instead_of_showing_its_english()
+    {
+        var h = new Harness(translator: new LeavesOutLastLineOnce());
+
+        h.Watcher.Emit(1, 1, "Where is the griffin?\nOut by the old mill.", false, update: false, CancellationToken.None);
+
+        Assert.True(h.Sink.WaitFor(e => e.Any(IsTranslated)));
+        Assert.Equal(
+        [
+            new RecordingSink.Detected(1_000_001, "Where is the griffin?\nOut by the old mill.", false),
+            ("failed", 1_000_001, "Where is the griffin?\nOut by the old mill."),
+            ("translated", 1_000_001, "vi:Where is the griffin?\nvi:Out by the old mill."),
+        ], h.Sink.Events);
+    }
+
+    [Fact]
     public void Translation_state_is_kept_only_for_the_latest_lines()
     {
         var h = new Harness();

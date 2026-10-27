@@ -48,6 +48,36 @@ public class SubtitleBoardTests
     }
 
     [Fact]
+    public void A_line_that_is_not_language_is_dropped_from_the_box_and_the_history()
+    {
+        var board = new SubtitleBoard();
+        board.Detected(1, "Where is the griffin?", false);
+        board.Translated(1, "Con griffin ở đâu?", false, 3);
+        board.Detected(2, "Ilrn ooe", false);
+        board.Detected(3, "Out by the old mill.", false);
+
+        Assert.False(board.Translated(2, "", false, 3));
+
+        Assert.Equal([new SubtitleLineView("Con griffin ở đâu?", false), new SubtitleLineView("…", true)], board.Visible(3));
+        Assert.Equal(["Where is the griffin?", "Out by the old mill."], board.History(12).Select(h => h.Original));
+        Assert.Equal([1, 3], board.Records(12).Select(r => r.Id));
+    }
+
+    [Fact]
+    public void Dropping_a_line_of_an_earlier_conversation_keeps_the_box_on_the_current_one()
+    {
+        var board = new SubtitleBoard();
+        board.Detected(1, "Ilrn ooe", false);
+        board.Detected(2, "Where is the griffin?", false);
+        board.CloseWindow();
+        board.Detected(3, "Out by the old mill.", false);
+
+        board.Translated(1, "", false, 3);
+
+        Assert.Equal([new SubtitleLineView("…", true)], board.Visible(3));
+    }
+
+    [Fact]
     public void A_low_confidence_line_is_marked()
     {
         var board = new SubtitleBoard();

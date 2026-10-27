@@ -31,6 +31,19 @@ public class ProfileTranslatorTests
     static Task<TranslateResult> Translate(ITranslator translator, GameProfile? profile, params string[] lines) =>
         translator.TranslateAsync(new TranslateRequest(lines, "en", "vi", [new ContextLine("Hello.", "Xin chào.")], profile), CancellationToken.None);
 
+    [Fact]
+    public async Task An_engine_with_markup_of_its_own_gets_the_lines_as_they_are_with_the_profile_and_the_fix_rules_still_apply()
+    {
+        var mt = new ScriptedMt(_ => "Thả cá viền đỏ ra");
+        var profile = TestProfiles.Witcher3();
+
+        var result = await Translate(new ProfileTranslator(mt, placeholders: false), profile, "Let Roach go", "Vesemir!");
+
+        Assert.Equal(["Let Roach go"], mt.Sent); // no placeholders; the name-only line is still answered here
+        Assert.Same(profile, mt.Requests[0].Profile); // the engine marks the names itself (DeepL, Azure)
+        Assert.Equal(["Thả Roach ra", "Vesemir!"], result.Texts);
+    }
+
     [Theory]
     // kept as sent
     [InlineData("QZX1, xuống đây!")]

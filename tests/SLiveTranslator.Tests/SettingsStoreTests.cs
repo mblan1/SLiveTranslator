@@ -147,6 +147,7 @@ public class SettingsStoreTests
         s.Translation.ContextLines = 4;
         s.Translation.Free.MyMemoryEmail = "player@example.com";
         s.Translation.Claude.ApiKey = "sk-ant-round-trip";
+        s.Translation.Claude.Model = "claude-opus-5-5"; // the default is empty: the model box stays empty until a key check
         s.Translation.Claude.Effort = LlmEffort.Medium;
         s.Translation.Azure.ApiKey = "azure-key";
         s.Translation.Azure.Region = "southeastasia";

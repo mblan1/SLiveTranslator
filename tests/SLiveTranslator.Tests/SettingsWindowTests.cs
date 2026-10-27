@@ -55,6 +55,43 @@ public class SettingsWindowTests
     });
 
     [Fact]
+    public void Without_a_saved_model_claude_gets_the_recommended_one_and_a_saved_model_stays() => OnStaThread(() =>
+    {
+        // This window has no model list: an empty box would leave Claude unusable ("no model is picked").
+        var fresh = new AppSettings();
+        fresh.Translation.Provider = ProviderIds.Claude;
+        var window = new SettingsWindow(fresh, () => null, () => { });
+        Assert.True(window.TryApply());
+        Assert.Equal("claude-opus-5-5", fresh.Translation.Claude.Model);
+        window.Close();
+
+        var saved = new AppSettings();
+        saved.Translation.Claude.Model = "claude-haiku-5-5";
+        window = new SettingsWindow(saved, () => null, () => { });
+        Assert.True(window.TryApply());
+        Assert.Equal("claude-haiku-5-5", saved.Translation.Claude.Model);
+        window.Close();
+    });
+
+    [Fact]
+    public void A_provider_this_window_does_not_offer_survives_an_unrelated_save_and_a_pick_replaces_it() => OnStaThread(() =>
+    {
+        // A local LLM through Ollama (set by hand: this window offers only Free and Claude).
+        var settings = new AppSettings();
+        settings.Translation.Provider = ProviderIds.Compat;
+        var window = new SettingsWindow(settings, () => null, () => { });
+
+        window.HkClear.Text = "Ctrl+Shift+X";
+        Assert.True(window.TryApply());
+        Assert.Equal(ProviderIds.Compat, settings.Translation.Provider);
+
+        window.Provider.SelectedIndex = 1;
+        Assert.True(window.TryApply());
+        Assert.Equal(ProviderIds.Claude, settings.Translation.Provider);
+        window.Close();
+    });
+
+    [Fact]
     public void Typed_key_replaces_the_stored_one() => OnStaThread(() =>
     {
         var settings = new AppSettings();

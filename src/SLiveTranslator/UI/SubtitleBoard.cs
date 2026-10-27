@@ -56,7 +56,8 @@ internal sealed class SubtitleBoard
 
     /// <summary>
     /// Stores the translation. Returns true when the line had already left the subtitle box but is among the last
-    /// <paramref name="visibleLines"/>: the box takes it back, so a late translation is still seen.
+    /// <paramref name="visibleLines"/>: the box takes it back, so a late translation is still seen. An empty
+    /// translation (the line is not language) drops the line from the box and the history.
     /// </summary>
     /// <param name="lowConfidence">The reading that was translated is unreliable.</param>
     /// <param name="provider">The provider key the translation came from.</param>
@@ -64,6 +65,12 @@ internal sealed class SubtitleBoard
     {
         int index = _entries.FindLastIndex(e => e.Id == id);
         if (index < 0) return false;
+        if (translated.Length == 0)
+        {
+            _entries.RemoveAt(index);
+            if (index < _windowStart) _windowStart--;
+            return false;
+        }
         _entries[index].Translated = translated;
         _entries[index].Provider = provider;
         _entries[index].TranslatedLowConfidence = lowConfidence;

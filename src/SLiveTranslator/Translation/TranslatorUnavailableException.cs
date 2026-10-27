@@ -1,6 +1,7 @@
 using System;
 using System.Net.Http;
 using System.Threading.Tasks;
+using SLiveTranslator.Translation.Providers;
 
 namespace SLiveTranslator.Translation;
 
@@ -15,6 +16,9 @@ public sealed class TranslatorUnavailableException(string message, TimeSpan? ret
     /// one: the next service translates it, and no outage is reported.
     /// </summary>
     public bool AboutText { get; init; }
+
+    /// <summary>What the failure means for the account or the connection, when a provider said (<see cref="ProviderException"/>); null when unknown.</summary>
+    public CheckStatus? Status { get; init; }
 
     /// <summary>
     /// The service cannot answer now (refused, paused, unreachable, timed out), as opposed to a request no service can

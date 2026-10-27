@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using SLiveTranslator.Models;
+using SLiveTranslator.UI;
 
 namespace SLiveTranslator.Translation;
 
@@ -151,7 +152,7 @@ public sealed class GameProfileStore
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Problem(problems, $"The game profiles could not be prepared in {_dir}: {ex.Message}");
+            Problem(problems, Loc.F("Profiles.PrepareFailed", _dir, ex.Message));
         }
 
         var profiles = new List<GameProfile>();
@@ -167,7 +168,7 @@ public sealed class GameProfileStore
                 if (profile.Id.Length == 0) throw new JsonException("it has no id");
                 if (profiles.Any(p => p.Id.Equals(profile.Id, StringComparison.OrdinalIgnoreCase)))
                 {
-                    Problem(problems, $"The game profile {Path.GetFileName(path)} has the id \"{profile.Id}\" of another profile and is not used.");
+                    Problem(problems, Loc.F("Profiles.DuplicateId", Path.GetFileName(path), profile.Id));
                     continue;
                 }
                 profiles.Add(profile);
@@ -176,7 +177,7 @@ public sealed class GameProfileStore
             catch (Exception ex)
             {
                 // The file is the user's to edit: whatever is wrong with it, it is reported and the other profiles still load.
-                Problem(problems, $"The game profile {Path.GetFileName(path)} cannot be read ({ex.Message}) and is not used.");
+                Problem(problems, Loc.F("Profiles.Unreadable", Path.GetFileName(path), ex.Message));
             }
         }
         return new Loaded(profiles.ToArray(), files, problems.ToArray());
@@ -211,7 +212,7 @@ public sealed class GameProfileStore
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Without the record a shipped file counts as changed by the user: it is kept, never overwritten.
-            Problem(problems, "The record of the shipped game profiles could not be saved: " + ex.Message);
+            Problem(problems, Loc.F("Profiles.SeedStateNotSaved", ex.Message));
         }
     }
 

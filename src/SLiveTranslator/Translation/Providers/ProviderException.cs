@@ -17,5 +17,5 @@ internal sealed class ProviderException(CheckStatus status, string message, Time
     /// <summary>What the provider said, or <see cref="AccountProblemPause"/> for an account problem; null leaves the chain's default.</summary>
     public TimeSpan? RetryAfter { get; } = retryAfter ?? (status is CheckStatus.InvalidKey or CheckStatus.NoPermission or CheckStatus.NoCredit ? AccountProblemPause : null);
 
-    public TranslatorUnavailableException Unavailable() => new(Message, RetryAfter);
+    public TranslatorUnavailableException Unavailable() => new(Message, RetryAfter) { Status = Status };
 }

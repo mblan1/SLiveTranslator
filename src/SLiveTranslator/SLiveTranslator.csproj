@@ -24,6 +24,8 @@
   <ItemGroup>
     <!-- Game profiles shipped with the app; GameProfileStore writes them to the data folder on first use. -->
     <EmbeddedResource Include="Assets\Profiles\*.json" LogicalName="SLiveTranslator.Assets.Profiles.%(Filename)%(Extension)" />
+    <!-- The UI texts per language, read by UI/Loc.cs. -->
+    <EmbeddedResource Include="Assets\Strings\*.json" LogicalName="SLiveTranslator.Assets.Strings.%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

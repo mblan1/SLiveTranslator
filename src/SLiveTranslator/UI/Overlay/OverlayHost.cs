@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Linq;
+using SLiveTranslator.Models;
 using DRect = System.Drawing.Rectangle;
 using Forms = System.Windows.Forms;
 
@@ -75,12 +76,18 @@ public sealed class OverlayHost
 
     // ---- status toast ----
 
-    /// <summary>Short message at the top of the game's monitor. Windows hides tray notifications in games, this does not.</summary>
-    public void ShowStatus(string text, StatusKind kind, DRect? anchorPx = null, double seconds = 2.5)
+    /// <summary>Short message over the game. Windows hides tray notifications in games, this does not.</summary>
+    /// <param name="anchorPx">Picks the monitor (the game's); null keeps the one in use.</param>
+    /// <param name="regionPx">The subtitle region, for <see cref="NoticePosition.NearRegion"/>; the toast keeps clear of the translated lines next to it.</param>
+    public void ShowStatus(string text, StatusKind kind, DRect? anchorPx = null, double seconds = 2.5,
+        NoticePosition position = NoticePosition.TopCenter, DRect? regionPx = null)
     {
         Restore();
-        (_toast ??= new ToastOverlay()).ShowMessage(text, kind, ScreenFor(anchorPx).Bounds, seconds);
+        (_toast ??= new ToastOverlay()).ShowMessage(text, kind, ScreenFor(anchorPx).Bounds, seconds, position, regionPx, _subtitle?.BoundsPx);
     }
+
+    /// <summary>Takes the toast away before its time.</summary>
+    public void HideStatus() => _toast?.HideMessage();
 
     // ---- translate-screen labels ----
 

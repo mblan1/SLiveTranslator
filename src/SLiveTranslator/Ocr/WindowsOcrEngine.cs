@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Windows.Foundation;
 using Windows.Globalization;
 using Windows.Graphics.Imaging;
+using Loc = SLiveTranslator.UI.Loc;
 using WinOcr = Windows.Media.Ocr;
 
 namespace SLiveTranslator.Ocr;
@@ -45,8 +46,7 @@ public sealed class WindowsOcrEngine : IOcrEngine
         }
         engine ??= WinOcr.OcrEngine.TryCreateFromUserProfileLanguages();
         if (engine is null)
-            throw new InvalidOperationException(
-                "No Windows OCR language is installed. Open Settings > Time & Language > Language & region, add a language and make sure 'Optical character recognition' is included.");
+            throw new InvalidOperationException(Loc.Instance["Ocr.NoLanguage"]);
         return new WindowsOcrEngine(engine);
     }
 

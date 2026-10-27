@@ -47,7 +47,10 @@ public sealed class MyMemoryTranslator : ITranslator
     public long CharsToday => _usage?.Today ?? 0;
 
     /// <summary>The free characters per day: 50,000 with an email, 5,000 without.</summary>
-    public int DailyLimit => _email is null ? 5_000 : 50_000;
+    public int DailyLimit => DailyLimitFor(_email);
+
+    /// <inheritdoc cref="DailyLimit"/>
+    public static int DailyLimitFor(string? email) => string.IsNullOrWhiteSpace(email) ? 5_000 : 50_000;
 
     public async Task<IReadOnlyList<string>> TranslateAsync(IReadOnlyList<string> texts, string sourceLang, string targetLang, CancellationToken ct) =>
         (await TranslateAsync(TranslateRequest.Plain(texts, sourceLang, targetLang), ct)).Texts;

@@ -51,17 +51,24 @@ public sealed class DailyCharCounter
         }
     }
 
+    /// <summary>Characters were counted; the argument is today's new total. Raised on the thread that counted.</summary>
+    public event Action<long>? Counted;
+
     public void Add(int chars)
     {
         if (chars <= 0) return;
+        long total;
+        bool scheduleSave;
         lock (_gate)
         {
             Roll();
-            _chars += chars;
+            total = _chars += chars;
             _dirty = true;
-            if (_saveScheduled) return;
+            scheduleSave = !_saveScheduled;
             _saveScheduled = true;
         }
+        Counted?.Invoke(total);
+        if (!scheduleSave) return;
         _ = Task.Run(async () =>
         {
             await Task.Delay(_saveDelay);

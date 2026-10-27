@@ -12,6 +12,7 @@ public sealed class SubtitleOverlay : ClickThroughWindow
 {
     readonly StackPanel _lines = new();
     readonly Border _box;
+    DRect _bounds;
 
     public SubtitleOverlay()
     {
@@ -27,6 +28,9 @@ public sealed class SubtitleOverlay : ClickThroughWindow
         };
         Content = _box;
     }
+
+    /// <summary>Where the lines are (physical pixels); null while they are not shown.</summary>
+    public DRect? BoundsPx => Showing ? _bounds : null;
 
     /// <summary>
     /// Shows the latest dialog lines (oldest first, newest last and brightest) below the region, or above it when the
@@ -75,6 +79,7 @@ public sealed class SubtitleOverlay : ClickThroughWindow
         int x = Math.Clamp(regionPx.Left + (regionPx.Width - size.Width) / 2, screen.Left, Math.Max(screen.Left, screen.Right - size.Width));
         int below = regionPx.Bottom + gap;
         int y = below + size.Height <= screen.Bottom ? below : Math.Max(screen.Top, regionPx.Top - size.Height - gap);
+        _bounds = new DRect(x, y, size.Width, size.Height);
         ShowAt(x, y);
     }
 }

@@ -97,9 +97,10 @@ public partial class SettingsWindow : Window
     {
         foreach (var hotkey in new[] { HkScreen.Text, HkSubtitles.Text, HkRegion.Text, HkClear.Text, HkHistory.Text })
         {
-            if (!HotkeyManager.TryParse(hotkey, out _, out _))
+            var check = HotkeyManager.Validate(hotkey);
+            if (check.Result != HotkeyResult.Ok)
             {
-                MessageBox.Show(this, $"\"{hotkey}\" is not a valid hotkey. Use the form Ctrl+Shift+T.", "SLiveTranslator", MessageBoxButton.OK, MessageBoxImage.Warning);
+                MessageBox.Show(this, Loc.F("Hotkey.CannotUse", hotkey, HotkeyText.Explain(check)), "SLiveTranslator", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return false;
             }
         }

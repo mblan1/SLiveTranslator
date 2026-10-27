@@ -148,6 +148,26 @@ public class MyMemoryTranslatorTests
     }
 
     [Fact]
+    public void Each_count_reports_the_new_total_of_the_day_for_the_quota_warnings()
+    {
+        using var dir = new TempDir();
+        var clock = new TestClock(new DateTimeOffset(2026, 10, 28, 16, 0, 0, TimeSpan.Zero));
+        var usage = new DailyCharCounter(dir.File("mymemory-usage.json"), clock, TimeSpan.FromHours(1));
+        var totals = new List<long>();
+        usage.Counted += totals.Add;
+
+        usage.Add(30);
+        usage.Add(0); // nothing counted, nothing said
+        usage.Add(12);
+        clock.Advance(TimeSpan.FromHours(2)); // past local midnight
+        usage.Add(5);
+
+        Assert.Equal([30L, 42L, 5L], totals);
+        Assert.Equal(5_000, MyMemoryTranslator.DailyLimitFor("  "));
+        Assert.Equal(50_000, MyMemoryTranslator.DailyLimitFor("player@example.com"));
+    }
+
+    [Fact]
     public void Flush_writes_only_what_changed()
     {
         using var dir = new TempDir();

@@ -5,6 +5,8 @@ using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
+using SLiveTranslator.Capture;
+using SLiveTranslator.Models;
 using SLiveTranslator.UI;
 using SLiveTranslator.UI.Overlay;
 using Xunit;
@@ -125,6 +127,47 @@ public class OverlayHostTests
         overlay.ShowStatus("Translating screen…", StatusKind.Info);
 
         Assert.All(overlay.Windows, w => Assert.True(w.Window.IsVisible));
+    });
+
+    [Fact]
+    public void The_toast_goes_to_the_top_right_or_above_the_subtitle_region() => OnStaThread(overlay =>
+    {
+        var screen = Forms.Screen.PrimaryScreen!.Bounds;
+        overlay.ShowStatus("Subtitle region saved", StatusKind.Info, screen, 5, NoticePosition.TopRight);
+        Pump(TimeSpan.FromMilliseconds(100)); // the window takes the size of its new text on the next layout pass
+        var toast = overlay.Windows.Single(w => w.Name == "toast").Window;
+        Assert.True(Native.GetWindowRect(toast.Handle, out var right));
+        Assert.InRange(right.Right, screen.Right - 120, screen.Right);
+        Assert.InRange(right.Top, screen.Top, screen.Top + 120);
+
+        overlay.ShowStatus("Region cut off", StatusKind.Warning, screen, 5, NoticePosition.NearRegion, Region);
+        Pump(TimeSpan.FromMilliseconds(100));
+        Assert.True(Native.GetWindowRect(toast.Handle, out var near));
+        Assert.True(near.Bottom <= Region.Top, $"toast {near.ToRectangle()} overlaps the region {Region}");
+        Assert.InRange((near.Left + near.Right) / 2, (Region.Left + Region.Right) / 2 - 3, (Region.Left + Region.Right) / 2 + 3);
+    });
+
+    [Fact]
+    public void A_toast_near_a_region_at_the_bottom_stays_off_the_lines_drawn_above_it() => OnStaThread(overlay =>
+    {
+        var screen = Forms.Screen.PrimaryScreen!.Bounds;
+        var region = new DRect(screen.Left + 300, screen.Bottom - 120, 1000, 110); // no room for the lines below it
+        overlay.ShowSubtitleLines(
+        [
+            new SubtitleLineView("Ta đã bảo cháu rồi, Ciri.", false),
+            new SubtitleLineView("Con đường phía trước rất nguy hiểm.", false),
+            new SubtitleLineView("Cầm lấy thanh kiếm này.", false),
+        ], region, 22);
+        Pump(TimeSpan.FromMilliseconds(100));
+        overlay.ShowStatus("A subtitle line could not be translated", StatusKind.Error, screen, 5, NoticePosition.NearRegion, region);
+        Pump(TimeSpan.FromMilliseconds(100));
+
+        var subtitles = overlay.Windows.Single(w => w.Name == "subtitles").Window;
+        var toast = overlay.Windows.Single(w => w.Name == "toast").Window;
+        Assert.True(Native.GetWindowRect(subtitles.Handle, out var lines));
+        Assert.True(Native.GetWindowRect(toast.Handle, out var notice));
+        Assert.True(lines.Bottom <= region.Top, $"lines {lines.ToRectangle()} are not above the region {region}");
+        Assert.True(notice.Bottom <= lines.Top, $"toast {notice.ToRectangle()} covers the lines {lines.ToRectangle()}");
     });
 
     /// <summary>Runs the thread's dispatcher for a while, so its timers fire.</summary>

@@ -2,10 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using SLiveTranslator.Models;
 using SLiveTranslator.Translation;
+using SLiveTranslator.Translation.Providers;
 using Xunit;
 
 namespace SLiveTranslator.Tests;
@@ -346,6 +348,44 @@ public class FallbackTranslatorTests
         var result = await chain.TranslateAsync(TranslateRequest.Plain(["A", "B"], "en", "vi"), CancellationToken.None);
 
         Assert.Equal([0], result.FailedLines);
+    }
+
+    [Fact]
+    public async Task The_switch_says_what_the_failure_meant_so_the_notice_can_name_it()
+    {
+        var clock = new TestClock(DateTimeOffset.UnixEpoch);
+        var claude = new Stub("claude/x", _ => throw new ProviderException(CheckStatus.NoCredit, "Claude: HTTP 400 billing_error").Unavailable());
+        var chain = new FallbackTranslator("claude/x", claude, new Stub("free-mt", texts => texts.ToList())) { MembersAreProviders = true, Time = clock };
+        var switches = new List<ServiceSwitch>();
+        chain.ServiceSwitched += (_, e) => switches.Add(e);
+
+        await chain.TranslateAsync(["a"], "en", "vi", CancellationToken.None);
+        await chain.TranslateAsync(["b"], "en", "vi", CancellationToken.None); // passed over while paused
+
+        var change = Assert.Single(switches);
+        Assert.Equal(CheckStatus.NoCredit, change.Status);
+        Assert.Equal("Claude: HTTP 400 billing_error", change.Reason);
+    }
+
+    [Theory]
+    [InlineData("network", CheckStatus.Network)]
+    [InlineData("timeout", CheckStatus.Timeout)]
+    [InlineData("unknown", null)]
+    public async Task A_failure_without_a_provider_status_gets_one_from_its_kind(string failure, CheckStatus? expected)
+    {
+        var provider = new Stub("openai/x", _ => throw (failure switch
+        {
+            "network" => new HttpRequestException("no route"),
+            "timeout" => new TaskCanceledException("slow"),
+            _ => (Exception)new TranslatorUnavailableException("odd answer"),
+        }));
+        var chain = new FallbackTranslator("openai/x", provider, new Stub("free-mt", texts => texts.ToList())) { MembersAreProviders = true };
+        var switches = new List<ServiceSwitch>();
+        chain.ServiceSwitched += (_, e) => switches.Add(e);
+
+        await chain.TranslateAsync(["a"], "en", "vi", CancellationToken.None);
+
+        Assert.Equal(expected, Assert.Single(switches).Status);
     }
 
     /// <summary>An LLM that leaves one line of every request out of its answer.</summary>

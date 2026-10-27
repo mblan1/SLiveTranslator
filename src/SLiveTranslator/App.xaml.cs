@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Data;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using SLiveTranslator.Capture;
@@ -26,6 +27,12 @@ namespace SLiveTranslator;
 public partial class App : Application
 {
     readonly SettingsStore _store = new(DataPaths.Current.SettingsFile);
+    readonly DailyCharCounter _myMemoryUsage = new(DataPaths.Current.MyMemoryUsageFile);
+    readonly ProviderRegistry _providers;
+    readonly GameProfileStore _profiles = new(DataPaths.Current.ProfilesDir);
+    readonly Notifier _notifier;
+    readonly AlertRules _alerts;
+    readonly List<(Forms.ToolStripItem Item, string Key)> _trayTexts = new();
     AppSettings _settings = new();
     OverlayHost? _overlay;
     SubtitlePresenter? _presenter;
@@ -35,15 +42,19 @@ public partial class App : Application
     HotkeyManager? _hotkeys;
     IOcrEngine? _ocr;
     CachedTranslator? _translator;
-    readonly ProviderRegistry _providers = new(DataPaths.Current.CacheFile, new DailyCharCounter(DataPaths.Current.MyMemoryUsageFile));
-    readonly GameProfileStore _profiles = new(DataPaths.Current.ProfilesDir);
     SubtitleWatcher? _subtitles;
     ScreenTranslator? _screenTranslator;
     CancellationTokenSource? _screenCts;
     DispatcherTimer? _clearTimer;
     Mutex? _singleInstance;
-    string _lastError = "";
-    DateTime _lastErrorAt;
+
+    public App()
+    {
+        _providers = new ProviderRegistry(DataPaths.Current.CacheFile, _myMemoryUsage);
+        _notifier = new Notifier(new AppNoticeSurface(Dispatcher, () => _overlay, () => _tray), () => _settings.Notifications,
+            () => _settings.Subtitles.Region?.ToRectangle());
+        _alerts = new AlertRules(_notifier);
+    }
 
     void OnStartup(object sender, StartupEventArgs e)
     {
@@ -52,9 +63,10 @@ public partial class App : Application
         {
             Log.Error("dispatcher: " + args.Exception);
             args.Handled = true;
-            ShowError(args.Exception.Message);
+            ShowError(Loc.F("Notice.Unexpected", args.Exception.Message));
         };
         _settings = _store.Load();
+        Loc.Instance.SetLanguage(_settings.Ui.Language);
         Log.Level = _settings.Storage.LogLevel;
         Log.MaxBytes = Math.Max(64, _settings.Storage.LogMaxKB) * 1024L;
         var problems = SettingsProblems();
@@ -71,8 +83,7 @@ public partial class App : Application
         _singleInstance = new Mutex(true, @"Local\SLiveTranslator.Instance", out bool firstInstance);
         if (!firstInstance)
         {
-            MessageBox.Show("SLiveTranslator is already running.\n\nUse the \"T\" icon in the system tray, or exit it there before starting it again.",
-                "SLiveTranslator", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show(Loc.Instance["App.AlreadyRunning"], "SLiveTranslator", MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown();
             return;
         }
@@ -84,10 +95,11 @@ public partial class App : Application
         problems.AddRange(_profiles.Problems);
         _overlay = new OverlayHost();
         _providers.ServiceSwitched += OnServiceSwitched;
+        _myMemoryUsage.Counted += OnMyMemoryCounted;
 
         _presenter = new SubtitlePresenter(Dispatcher, _overlay, () => _subtitles?.Region ?? default, () => _settings.Overlay.FontSize,
             () => _settings.Overlay.MaxLines, () => Hotkey(HotkeyAction.History), ShowError,
-            notice => _overlay.ShowStatus($"{notice} Press {Hotkey(HotkeyAction.SelectRegion)}.", StatusKind.Warning, _subtitles?.Region, 8),
+            notice => _notifier.Notify(NoticeCategory.Warning, Loc.F("Notice.FixRegion", notice, Hotkey(HotkeyAction.SelectRegion)), _subtitles?.Region),
             ShowLiveBadge);
         _screenTranslator = new ScreenTranslator(() => _ocr!, () => _translator!, Langs, ForegroundProfile);
         _subtitles = new SubtitleWatcher(() => _ocr!, () => _translator!, SubtitleConfig, _presenter) { Profiles = ProfileFor };
@@ -100,21 +112,22 @@ public partial class App : Application
         };
 
         CreateTray();
+        Loc.Instance.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == Binding.IndexerName) LocalizeTray();
+        };
         if (RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
 
-        // One toast holds every startup problem (a later toast would replace an earlier one), shown before the
-        // first-run settings window so a reset to defaults is explained before the user saves over it.
-        if (problems.Count > 0)
-            _overlay.ShowStatus(string.Join("\n", problems), StatusKind.Warning, Forms.Screen.PrimaryScreen?.Bounds, 12);
+        // Shown before the first-run settings window, so a reset to defaults is explained before the user saves over it.
+        ShowProblems(problems);
         if (!_settings.General.FirstRunDone)
         {
             ShowSettings();
             return;
         }
-        string keys = $"{Hotkey(HotkeyAction.ToggleSubtitles)}: subtitles   {Hotkey(HotkeyAction.TranslateScreen)}: translate screen   {Hotkey(HotkeyAction.History)}: history";
-        Balloon("SLiveTranslator is running", keys);
-        if (problems.Count == 0)
-            _overlay.ShowStatus("SLiveTranslator ready  ·  " + keys, StatusKind.Info, Forms.Screen.PrimaryScreen?.Bounds, 5);
+        string keys = Loc.F("Notice.Keys", Hotkey(HotkeyAction.ToggleSubtitles), Hotkey(HotkeyAction.TranslateScreen), Hotkey(HotkeyAction.History));
+        _notifier.StartupBalloon(Loc.Instance["Notice.Running"], keys);
+        if (problems.Count == 0) _notifier.Feedback(NoticeCategory.Status, Loc.F("Notice.Ready", keys), Forms.Screen.PrimaryScreen?.Bounds);
     }
 
     /// <summary>Problems with the data folder or settings.json found while loading; logged here, shown once the overlay is up.</summary>
@@ -122,12 +135,18 @@ public partial class App : Application
     {
         var problems = new List<string>();
         if (DataPaths.Current.UnavailableLocation is { } missing)
-            problems.Add($"The data folder {missing} is not available, so the default folder {DataPaths.Current.Root} is in use. Connect the drive and restart SLiveTranslator.");
+            problems.Add(Loc.F("Startup.DataFolderUnavailable", missing, DataPaths.Current.Root));
         if (_settings.IsNewerSchema)
-            problems.Add($"settings.json comes from a newer SLiveTranslator (schema {_settings.SchemaVersion}): the settings this version does not know are kept but not used.");
+            problems.Add(Loc.F("Startup.NewerSchema", _settings.SchemaVersion));
         foreach (var problem in problems) Log.Warn("startup: " + problem);
         if (_store.LoadProblem is { } loadProblem) problems.Add(loadProblem); // the store logged it
         return problems;
+    }
+
+    /// <summary>Every problem in one warning: a later toast would replace an earlier one.</summary>
+    void ShowProblems(List<string> problems)
+    {
+        if (problems.Count > 0) _notifier.Feedback(NoticeCategory.Warning, string.Join("\n", problems), Forms.Screen.PrimaryScreen?.Bounds);
     }
 
     string Hotkey(HotkeyAction action) => _settings.Hotkeys[action];
@@ -167,7 +186,7 @@ public partial class App : Application
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            ShowError("Settings could not be saved: " + ex.Message);
+            _notifier.Feedback(NoticeCategory.Error, Loc.F("Notice.SettingsNotSaved", ex.Message));
         }
     }
 
@@ -193,17 +212,21 @@ public partial class App : Application
         return problems;
     }
 
-    /// <summary>
-    /// The provider the user selected stopped answering and the free services translate instead: said once per switch,
-    /// so a paid provider out of credit is not replaced unnoticed. The free services' own switch (Google blocked, so
-    /// MyMemory) and the way back are only logged.
-    /// </summary>
-    void OnServiceSwitched(object? sender, ServiceSwitch e)
+    /// <summary>The selected provider gave way to the free services, or came back (see <see cref="AlertRules.ServiceSwitched"/>).</summary>
+    void OnServiceSwitched(object? sender, ServiceSwitch e) => Dispatcher.BeginInvoke(() =>
     {
-        if (e.Reason.Length == 0 || e.From != _translator?.Name) return;
-        Dispatcher.BeginInvoke(() => _overlay?.ShowStatus($"{e.From} is not answering, so the free services translate for now. {e.Reason}",
-            StatusKind.Warning, _subtitles?.Region, 8));
-    }
+        if (_translator is null) return;
+        string id = _settings.Translation.Provider;
+        string name = _providers.Providers.FirstOrDefault(p => p.Id.Equals(id, StringComparison.OrdinalIgnoreCase))?.DisplayName ?? e.From;
+        _alerts.ServiceSwitched(e, _translator.Name, name, _subtitles?.Region);
+    });
+
+    /// <summary>MyMemory counted characters on a translation thread; its quota is checked on the UI thread, where the settings live.</summary>
+    void OnMyMemoryCounted(long today) => Dispatcher.BeginInvoke(() =>
+    {
+        string email = _settings.Translation.Free.MyMemoryEmail;
+        _alerts.MyMemoryUsage(today, MyMemoryTranslator.DailyLimitFor(email), hasEmail: !string.IsNullOrWhiteSpace(email));
+    });
 
     bool IsOwnWindow(IntPtr hwnd) =>
         Windows.OfType<Window>().Any(w => new WindowInteropHelper(w).Handle == hwnd);
@@ -216,51 +239,58 @@ public partial class App : Application
         _iconLive = TrayIcon.Create(TrayIcon.Live);
 
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Translate screen now", null, (_, _) => TranslateScreen());
-        _subtitleMenu = new Forms.ToolStripMenuItem("Subtitle mode", null, (_, _) => ToggleSubtitles());
-        menu.Items.Add(_subtitleMenu);
-        _historyMenu = new Forms.ToolStripMenuItem("Dialog history", null, (_, _) => ToggleHistory());
-        menu.Items.Add(_historyMenu);
-        menu.Items.Add("Select subtitle region…", null, (_, _) => SelectRegion());
-        menu.Items.Add("Clear overlay", null, (_, _) => ClearOverlay());
+        Forms.ToolStripMenuItem Item(string key, Action onClick)
+        {
+            var item = new Forms.ToolStripMenuItem(Loc.Instance[key], null, (_, _) => onClick());
+            _trayTexts.Add((item, key));
+            menu.Items.Add(item);
+            return item;
+        }
+        Item("Tray.TranslateScreen", TranslateScreen);
+        _subtitleMenu = Item("Tray.Subtitles", ToggleSubtitles);
+        _historyMenu = Item("Tray.History", ToggleHistory);
+        Item("Tray.SelectRegion", () => SelectRegion());
+        Item("Tray.Clear", ClearOverlay);
         menu.Items.Add(new Forms.ToolStripSeparator());
-        menu.Items.Add("Settings…", null, (_, _) => ShowSettings());
-        menu.Items.Add("Open data folder", null, (_, _) =>
+        Item("Tray.Settings", ShowSettings);
+        Item("Tray.OpenDataFolder", () =>
         {
             Directory.CreateDirectory(DataPaths.Current.Root);
             Process.Start("explorer.exe", DataPaths.Current.Root);
         });
-        menu.Items.Add("Exit", null, (_, _) => Shutdown());
+        Item("Tray.Exit", Shutdown);
 
         _tray = new Forms.NotifyIcon
         {
             Icon = _iconIdle,
-            Text = "SLiveTranslator",
+            Text = Loc.Instance["Tray.Tooltip"],
             Visible = true,
             ContextMenuStrip = menu,
         };
         _tray.DoubleClick += (_, _) => ShowSettings();
     }
 
+    /// <summary>The tray in the language just chosen.</summary>
+    void LocalizeTray()
+    {
+        foreach (var (item, key) in _trayTexts) item.Text = Loc.Instance[key];
+        SetLive(_subtitles?.IsRunning == true);
+    }
+
     /// <returns>A problem to show the user, or null when every enabled hotkey is registered.</returns>
     string? RegisterHotkeys()
     {
         _hotkeys ??= new HotkeyManager();
-        _hotkeys.UnregisterAll();
-        var failed = new List<string>();
-        void Register(HotkeyAction hotkey, Action action)
+        var results = _hotkeys.RegisterAll(_settings.Hotkeys, new Dictionary<HotkeyAction, Action>
         {
-            if (_settings.Hotkeys.Disabled.Contains(hotkey)) return;
-            if (!_hotkeys.Register(Hotkey(hotkey), action)) failed.Add(Hotkey(hotkey));
-        }
-        Register(HotkeyAction.TranslateScreen, TranslateScreen);
-        Register(HotkeyAction.ToggleSubtitles, ToggleSubtitles);
-        Register(HotkeyAction.SelectRegion, () => SelectRegion());
-        Register(HotkeyAction.Clear, ClearOverlay);
-        Register(HotkeyAction.History, ToggleHistory);
-        if (failed.Count == 0) return null;
-        string problem = "Could not register hotkeys: " + string.Join(", ", failed) + ". Another program uses them; change them in Settings.";
-        Log.Error(problem);
+            [HotkeyAction.TranslateScreen] = TranslateScreen,
+            [HotkeyAction.ToggleSubtitles] = ToggleSubtitles,
+            [HotkeyAction.SelectRegion] = () => SelectRegion(),
+            [HotkeyAction.Clear] = ClearOverlay,
+            [HotkeyAction.History] = ToggleHistory,
+        });
+        if (HotkeyText.Problems(results, _settings.Hotkeys) is not { } problem) return null;
+        Log.Warn("hotkeys: " + string.Join(", ", results.Select(r => $"{r.Key}={_settings.Hotkeys[r.Key]}:{r.Value}")));
         return problem;
     }
 
@@ -268,7 +298,7 @@ public partial class App : Application
     {
         if (_ocr is null || _screenTranslator is null || _overlay is null)
         {
-            ShowError("OCR is not available.");
+            _notifier.Feedback(NoticeCategory.Error, Loc.Instance["Notice.OcrUnavailable"]);
             return;
         }
         _screenCts?.Cancel();
@@ -279,7 +309,7 @@ public partial class App : Application
             var mouse = Forms.Cursor.Position;
             _overlay.ClearLabels();
             _clearTimer?.Stop();
-            _overlay.ShowStatus("Translating screen…", StatusKind.Info, area, 30);
+            _notifier.Progress(Loc.Instance["Notice.TranslatingScreen"], area, seconds: 30); // until the result replaces it
             if (!_overlay.ExcludedFromCapture)
             {
                 _overlay.Hide();
@@ -298,8 +328,9 @@ public partial class App : Application
             if (cts.IsCancellationRequested) return;
 
             Draw(result);
-            if (result.Count == 0) _overlay.ShowStatus("No text found in the game window", StatusKind.Warning, area);
-            else _overlay.ShowStatus($"Translated {result.Count} text blocks", StatusKind.Info, area, 1.5);
+            if (result.Count == 0) _notifier.Feedback(NoticeCategory.Warning, Loc.Instance["Notice.NoTextFound"], area);
+            else _notifier.Feedback(NoticeCategory.Status, Loc.F("Notice.TranslatedBlocks", result.Count), area);
+            _notifier.EndProgress(); // with that category off, the progress notice must not stay for its 30 s
             StartClearTimer();
         }
         catch (OperationCanceledException)
@@ -309,7 +340,8 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log.Error("translate screen: " + ex);
-            ShowError(ex.Message);
+            _notifier.Feedback(NoticeCategory.Error, Loc.F("Notice.TranslateScreenFailed", ex.Message));
+            _notifier.EndProgress();
         }
     }
 
@@ -328,7 +360,7 @@ public partial class App : Application
         if (_subtitles.IsRunning)
         {
             StopSubtitles();
-            _overlay.ShowStatus("Subtitles OFF", StatusKind.Off, _subtitles.Region);
+            _notifier.Feedback(NoticeCategory.Status, Loc.Instance["Notice.SubtitlesOff"], _subtitles.Region, StatusKind.Off);
             return;
         }
         StartSubtitles(restart: false);
@@ -340,7 +372,7 @@ public partial class App : Application
         if (_subtitles is null || _overlay is null) return;
         if (_ocr is null)
         {
-            ShowError("OCR is not available.");
+            _notifier.Feedback(NoticeCategory.Error, Loc.Instance["Notice.OcrUnavailable"]);
             return;
         }
         if (_settings.Subtitles.Region is null && SelectRegion() is null) return;
@@ -351,15 +383,15 @@ public partial class App : Application
         ShowLiveBadge(paused: false);
         SetLive(true);
         if (!WarnIfLargeRegion(region))
-            _overlay.ShowStatus($"Subtitles ON  ·  {Hotkey(HotkeyAction.ToggleSubtitles)} to stop  ·  {Hotkey(HotkeyAction.History)} for history",
-                StatusKind.On, region, 3);
+            _notifier.Feedback(NoticeCategory.Status, Loc.F("Notice.SubtitlesOn", Hotkey(HotkeyAction.ToggleSubtitles), Hotkey(HotkeyAction.History)),
+                region, StatusKind.On);
     }
 
     /// <summary>The marker at the region; while the game is not in front it says why nothing is translated.</summary>
     void ShowLiveBadge(bool paused)
     {
         if (_subtitles?.IsRunning != true) return; // a late message from a session that was stopped meanwhile
-        _overlay?.ShowLiveBadge(_subtitles.Region, paused ? "Subtitles paused · game not in front" : "Subtitles on");
+        _notifier.ShowLiveBadge(_subtitles.Region, Loc.Instance[paused ? "Badge.Paused" : "Badge.On"]);
     }
 
     void StopSubtitles()
@@ -367,7 +399,7 @@ public partial class App : Application
         if (_subtitles?.IsRunning != true) return;
         _subtitles.Stop();
         _presenter?.Stop();
-        _overlay?.HideLiveBadge();
+        _notifier.HideLiveBadge();
         SetLive(false);
     }
 
@@ -376,17 +408,16 @@ public partial class App : Application
         if (_subtitleMenu is not null) _subtitleMenu.Checked = on;
         if (_tray is null) return;
         _tray.Icon = on ? _iconLive : _iconIdle;
-        _tray.Text = on ? "SLiveTranslator – subtitles ON" : "SLiveTranslator";
+        _tray.Text = Loc.Instance[on ? "Tray.TooltipLive" : "Tray.Tooltip"];
     }
 
     /// <summary>A whole-screen "subtitle" re-translates every HUD change, is slow, and burns the free daily quota in minutes.</summary>
+    /// <returns>Whether the warning was shown; when it was not (warnings off, muted), the caller shows its own notice.</returns>
     bool WarnIfLargeRegion(DRect region)
     {
         var screen = Forms.Screen.FromRectangle(region).Bounds;
         if ((double)region.Width * region.Height <= 0.35 * screen.Width * screen.Height) return false;
-        _overlay?.ShowStatus($"Subtitle region is almost the whole screen: slow and misses lines. Press {Hotkey(HotkeyAction.SelectRegion)} and select only the subtitle strip.",
-            StatusKind.Warning, region, 8);
-        return true;
+        return _notifier.Feedback(NoticeCategory.Warning, Loc.F("Notice.LargeRegion", Hotkey(HotkeyAction.SelectRegion)), region);
     }
 
     void ToggleHistory()
@@ -409,7 +440,7 @@ public partial class App : Application
         }
         _settings.Subtitles.Region = RegionSettings.From(rect);
         TrySaveSettings();
-        if (!WarnIfLargeRegion(rect)) _overlay?.ShowStatus("Subtitle region saved", StatusKind.Info, rect);
+        if (!WarnIfLargeRegion(rect)) _notifier.Feedback(NoticeCategory.Status, Loc.Instance["Notice.RegionSaved"], rect);
         if (wasRunning) StartSubtitles(restart: true);
         return rect;
     }
@@ -423,7 +454,7 @@ public partial class App : Application
         StopSubtitles();
         _presenter?.HideHistory();
         if (_historyMenu is not null) _historyMenu.Checked = false;
-        _overlay?.ShowStatus(wasRunning ? "Overlay cleared  ·  subtitles OFF" : "Overlay cleared", StatusKind.Off, GameArea());
+        _notifier.Feedback(NoticeCategory.Status, Loc.Instance[wasRunning ? "Notice.ClearedSubtitlesOff" : "Notice.Cleared"], GameArea(), StatusKind.Off);
     }
 
     void ShowSettings()
@@ -436,35 +467,21 @@ public partial class App : Application
         var dialog = new SettingsWindow(_settings, SelectRegion, () => _store.Save(_settings));
         if (dialog.ShowDialog() != true) return;
 
+        Loc.Instance.SetLanguage(_settings.Ui.Language);
         bool restart = _subtitles?.IsRunning == true;
         StopSubtitles();
         var problems = BuildServices();
         if (RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
         if (restart) StartSubtitles(restart: true);
-        if (problems.Count > 0) _overlay?.ShowStatus(string.Join("\n", problems), StatusKind.Warning, Forms.Screen.PrimaryScreen?.Bounds, 12);
-        else if (!restart) _overlay?.ShowStatus("Settings saved", StatusKind.Info, Forms.Screen.PrimaryScreen?.Bounds);
+        if (problems.Count > 0) ShowProblems(problems);
+        else if (!restart) _notifier.Feedback(NoticeCategory.Status, Loc.Instance["Notice.SettingsSaved"], Forms.Screen.PrimaryScreen?.Bounds);
     }
 
-    /// <summary>Errors go to the in-game overlay: Windows suppresses tray notifications while a game is in front.</summary>
-    void ShowError(string message)
-    {
-        // A failure that repeats on every subtitle line (both free services paused) would otherwise fill the log.
-        Log.Once("shown: " + message, message, TimeSpan.FromMinutes(1), LogLevel.Error);
-        if (message == _lastError && DateTime.UtcNow - _lastErrorAt < TimeSpan.FromSeconds(10)) return;
-        _lastError = message;
-        _lastErrorAt = DateTime.UtcNow;
-        if (_overlay is not null) _overlay.ShowStatus(message, StatusKind.Error, null, 6);
-        else Balloon("SLiveTranslator", message, Forms.ToolTipIcon.Warning);
-    }
-
-    void Balloon(string title, string text, Forms.ToolTipIcon icon = Forms.ToolTipIcon.Info)
-    {
-        if (_tray is null) return;
-        _tray.BalloonTipTitle = title;
-        _tray.BalloonTipText = text;
-        _tray.BalloonTipIcon = icon;
-        _tray.ShowBalloonTip(4000);
-    }
+    /// <summary>
+    /// An error that arose by itself (a subtitle line, an unexpected failure), on the in-game overlay: Windows suppresses
+    /// tray notifications while a game is in front. A failure of what the user just did is Feedback instead.
+    /// </summary>
+    void ShowError(string message) => _notifier.Notify(NoticeCategory.Error, message);
 
     void OnExit(object sender, ExitEventArgs e)
     {

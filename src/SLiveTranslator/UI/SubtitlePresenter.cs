@@ -116,7 +116,7 @@ public sealed class SubtitlePresenter : ISubtitleSink
     {
         _board.Failed(id);
         Render();
-        _onError(error);
+        _onError(Loc.F("Notice.LineFailed", error));
     });
 
     public void Cleared() => _ui.BeginInvoke(() =>
@@ -127,7 +127,7 @@ public sealed class SubtitlePresenter : ISubtitleSink
 
     public void Paused(bool paused) => _ui.BeginInvoke(() => _onPaused(paused));
 
-    public void Error(string message) => _ui.BeginInvoke(() => _onError(message));
+    public void Error(string message) => _ui.BeginInvoke(() => _onError(Loc.F("Notice.ReadFailed", message)));
 
     public void Notice(string message) => _ui.BeginInvoke(() => _onNotice(message));
 
@@ -146,5 +146,5 @@ public sealed class SubtitlePresenter : ISubtitleSink
     }
 
     void RenderHistory() =>
-        _overlay.ShowHistory($"Dialog history ({_board.Count} lines)  ·  {_historyHotkey()} to close", _board.History(HistoryLines), _region());
+        _overlay.ShowHistory(Loc.F("History.Title", _board.Count, _historyHotkey()), _board.History(HistoryLines), _region());
 }

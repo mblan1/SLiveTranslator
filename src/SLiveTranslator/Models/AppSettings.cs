@@ -98,6 +98,9 @@ public sealed class NotificationSettings : SettingsSection
     public bool Sound { get; set; }
     public bool TrayBalloons { get; set; } = true;
     public bool LiveBadge { get; set; } = true;
+
+    /// <summary>Hides every notice but errors, and every sound (the tray's "Mute notifications").</summary>
+    public bool Muted { get; set; }
 }
 
 public sealed class StorageSettings : SettingsSection

@@ -84,7 +84,7 @@ internal static class ProviderHttp
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new TranslatorUnavailableException(NoAnswer(service, timeout));
+            throw new TranslatorUnavailableException(NoAnswer(service, timeout)) { Status = CheckStatus.Timeout };
         }
     }
 

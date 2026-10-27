@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using SLiveTranslator.Models;
 using SLiveTranslator.Translation.Providers;
+using SLiveTranslator.UI;
 
 namespace SLiveTranslator.Translation;
 
@@ -31,9 +32,9 @@ public sealed record ProviderRegistration(string Id, string DisplayName, bool Ta
         };
 
     /// <summary>
-    /// Why the provider cannot run with these settings, as a notice for the user; null when it can. A key that is
-    /// missing or cannot be decrypted, a missing server address, or no model picked (an LLM's model box stays empty
-    /// until a key check) all leave the free services translating.
+    /// Why the provider cannot run with these settings, as a notice for the user in the app's language; null when it
+    /// can. A key that is missing or cannot be decrypted, a missing server address, or no model picked (an LLM's model
+    /// box stays empty until a key check) all leave the free services translating.
     /// </summary>
     public string? Unusable(TranslationSettings settings)
     {
@@ -41,8 +42,8 @@ public sealed record ProviderRegistration(string Id, string DisplayName, bool Ta
         // An undecryptable key must not reach an SDK as "": it may fall back to a key in the environment, which may
         // bill someone else.
         if (section.ApiKeyUnreadable)
-            return $"The saved {DisplayName} API key cannot be decrypted on this Windows account. Enter it again in Settings; the free services are used until then.";
-        string noKey = $"{DisplayName} is selected but has no API key. Enter one in Settings; the free services are used until then.";
+            return Loc.F("Provider.KeyUnreadable", DisplayName);
+        string noKey = Loc.F("Provider.NoKey", DisplayName);
         bool keyEmpty = section.ApiKey.Trim().Length == 0;
         if (Provider is null) return keyEmpty ? noKey : null;
         var config = ProviderConfig.From(section, Provider.DefaultModel);
@@ -50,9 +51,9 @@ public sealed record ProviderRegistration(string Id, string DisplayName, bool Ta
         if (keyEmpty && Provider.NeedsKey(config.Credentials)) return noKey;
         if (Provider.Fields.Any(f => f is { Field: ProviderField.BaseUrl, Required: true })
             && !(Uri.TryCreate(config.Credentials.BaseUrl, UriKind.Absolute, out var url) && url.Scheme is "http" or "https"))
-            return $"{DisplayName} is selected but has no valid server address. Enter one in Settings; the free services are used until then.";
+            return Loc.F("Provider.NoServer", DisplayName);
         if (config.Model.Length == 0)
-            return $"{DisplayName} is selected but no model is picked. Check the key in Settings and pick a model; the free services are used until then.";
+            return Loc.F("Provider.NoModel", DisplayName);
         return null;
     }
 }

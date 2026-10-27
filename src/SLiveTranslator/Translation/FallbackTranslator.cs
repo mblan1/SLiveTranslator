@@ -1,15 +1,18 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using SLiveTranslator.Models;
+using SLiveTranslator.Translation.Providers;
 
 namespace SLiveTranslator.Translation;
 
 /// <summary>Another service of a chain answered than the one before.</summary>
 /// <param name="Reason">Why the earlier ones failed; empty when the chain went back to a service that works again.</param>
-public sealed record ServiceSwitch(string From, string To, string Reason);
+/// <param name="Status">What the first failure meant (no credit, timeout …), for a localized reason; null when unknown or nothing failed.</param>
+public sealed record ServiceSwitch(string From, string To, string Reason, CheckStatus? Status = null);
 
 /// <summary>Tries each translator in order and moves on when one is blocked, over quota, or unreachable.</summary>
 public sealed class FallbackTranslator : ITranslator
@@ -20,10 +23,10 @@ public sealed class FallbackTranslator : ITranslator
     /// <summary>How long a provider that failed is passed over when it does not say how long it is paused.</summary>
     public static readonly TimeSpan DefaultPause = TimeSpan.FromSeconds(30);
 
-    sealed record Pause(DateTimeOffset Until, string Reason);
+    sealed record Pause(DateTimeOffset Until, string Reason, CheckStatus? Status);
 
     /// <summary>Why a member did not answer; <paramref name="AboutText"/> when it declined this text only, which is no outage.</summary>
-    readonly record struct Failure(string Reason, bool AboutText);
+    readonly record struct Failure(string Reason, bool AboutText, CheckStatus? Status);
 
     readonly IReadOnlyList<ITranslator> _chain;
     readonly Pause?[] _paused;
@@ -88,7 +91,7 @@ public sealed class FallbackTranslator : ITranslator
             bool pausable = MembersAreProviders && i < _chain.Count - 1;
             if (pausable && Volatile.Read(ref _paused[i]) is { } pause && Time.GetUtcNow() < pause.Until)
             {
-                failures.Add(new Failure(pause.Reason, AboutText: false));
+                failures.Add(new Failure(pause.Reason, AboutText: false, pause.Status));
                 continue;
             }
             TranslateResult result;
@@ -104,8 +107,9 @@ public sealed class FallbackTranslator : ITranslator
                 bool aboutText = unavailable?.AboutText == true;
                 string line = $"{translator.Name} unavailable: {ex.Message}";
                 Log.Once(line, line, retryAfter is { } wait && wait > TimeSpan.Zero ? wait : RepeatLogInterval, LogLevel.Warn);
-                failures.Add(new Failure(ex.Message, aboutText));
-                if (pausable && !aboutText) Volatile.Write(ref _paused[i], new Pause(Time.GetUtcNow() + (retryAfter ?? DefaultPause), ex.Message));
+                var status = unavailable?.Status ?? ex switch { HttpRequestException => CheckStatus.Network, TaskCanceledException => CheckStatus.Timeout, _ => (CheckStatus?)null };
+                failures.Add(new Failure(ex.Message, aboutText, status));
+                if (pausable && !aboutText) Volatile.Write(ref _paused[i], new Pause(Time.GetUtcNow() + (retryAfter ?? DefaultPause), ex.Message, status));
                 continue;
             }
             result = result with { Provider = MembersAreProviders ? result.Provider ?? translator.Name : Name };
@@ -158,6 +162,7 @@ public sealed class FallbackTranslator : ITranslator
         // Lines translated at the same time see the switch once: only the one that changes the field reports it.
         string from = Interlocked.Exchange(ref _answering, translator.Name) ?? _chain[0].Name;
         if (from == translator.Name) return;
-        ServiceSwitched?.Invoke(this, new ServiceSwitch(from, translator.Name, string.Join(" ", failures.Select(f => f.Reason).Distinct())));
+        ServiceSwitched?.Invoke(this, new ServiceSwitch(from, translator.Name, string.Join(" ", failures.Select(f => f.Reason).Distinct()),
+            failures.Count > 0 ? failures[0].Status : null));
     }
 }

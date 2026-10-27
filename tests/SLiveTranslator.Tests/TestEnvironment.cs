@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Runtime.CompilerServices;
 using SLiveTranslator.Models;
+using SLiveTranslator.UI;
 
 namespace SLiveTranslator.Tests;
 
@@ -21,6 +22,8 @@ static class TestEnvironment
     {
         Directory.CreateDirectory(DataDir);
         DataPaths.UseForTests(DataDir);
+        // Tests read the English notices whatever the PC's display language; no test switches the shared instance.
+        Loc.Instance.SetLanguage(Loc.English);
         AppDomain.CurrentDomain.ProcessExit += (_, _) => TempDir.TryDelete(DataDir);
     }
 }

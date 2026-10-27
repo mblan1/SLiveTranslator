@@ -10,6 +10,7 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using System.Threading;
+using SLiveTranslator.UI;
 
 namespace SLiveTranslator.Models;
 
@@ -42,6 +43,8 @@ public sealed class SettingsStore
 
     readonly string _path;
     readonly Func<string, string> _protectKey;
+    readonly Loc _loc;
+    (string Key, object?[] Args)? _problem;
     bool _v1BackupPending;
     bool _unreadBackupPending;
 
@@ -56,10 +59,12 @@ public sealed class SettingsStore
     }
 
     /// <param name="protectKey">Encrypts a plain version-1 key; replaceable so tests can make DPAPI fail.</param>
-    internal SettingsStore(string path, Func<string, string> protectKey)
+    /// <param name="loc">The texts of <see cref="LoadProblem"/>; the app's by default (a test switches the language of its own).</param>
+    internal SettingsStore(string path, Func<string, string> protectKey, Loc? loc = null)
     {
         _path = path;
         _protectKey = protectKey;
+        _loc = loc ?? Loc.Instance;
     }
 
     public string FilePath => _path;
@@ -72,8 +77,11 @@ public sealed class SettingsStore
     /// <summary>The last <see cref="Load"/> converted a version-1 file; save once to store it as schema 2 with encrypted keys.</summary>
     public bool MigratedFromV1 { get; private set; }
 
-    /// <summary>What went wrong in the last <see cref="Load"/>, to show the user; null when nothing did. Already logged.</summary>
-    public string? LoadProblem { get; private set; }
+    /// <summary>
+    /// What went wrong in the last <see cref="Load"/>, to show the user, in the language in use when it is read: the
+    /// language comes from the settings Load returns. Null when nothing went wrong. Already logged.
+    /// </summary>
+    public string? LoadProblem => _problem is { } problem ? _loc.Format(problem.Key, problem.Args) : null;
 
     /// <summary>
     /// Never throws: a missing or unreadable file gives defaults, and a damaged section gives that section's defaults.
@@ -85,7 +93,7 @@ public sealed class SettingsStore
         MigratedFromV1 = _v1BackupPending = _unreadBackupPending = false;
         _fileJson = null;
         _syncedJson = null;
-        LoadProblem = null;
+        _problem = null;
         if (ReadText() is not { } text) return new AppSettings();
 
         try
@@ -100,8 +108,7 @@ public sealed class SettingsStore
             if (broken.Count > 0)
             {
                 KeepCorruptCopy();
-                Problem($"Some settings in settings.json are damaged ({string.Join(", ", broken)}); their defaults are in use. " +
-                        $"The original file was kept as {Path.GetFileName(CorruptCopyPath)}.");
+                Problem("Store.SectionsDamaged", string.Join(", ", broken), Path.GetFileName(CorruptCopyPath));
             }
             _fileJson = root;
             _syncedJson = JsonSerializer.SerializeToNode(settings, JsonOptions);
@@ -110,7 +117,7 @@ public sealed class SettingsStore
         catch (Exception ex) when (IsBadContent(ex))
         {
             KeepCorruptCopy();
-            Problem($"settings.json is damaged ({ex.Message}); defaults are in use. The file was kept as {Path.GetFileName(CorruptCopyPath)}.");
+            Problem("Store.FileDamaged", ex.Message, Path.GetFileName(CorruptCopyPath));
             return new AppSettings();
         }
     }
@@ -180,8 +187,7 @@ public sealed class SettingsStore
                     continue;
                 }
                 _unreadBackupPending = true;
-                Problem($"settings.json could not be read ({ex.Message}); defaults are in use. " +
-                        $"The next save keeps the old file as {Path.GetFileName(UnreadCopyPath)}.");
+                Problem("Store.Unreadable", ex.Message, Path.GetFileName(UnreadCopyPath));
                 return null;
             }
         }
@@ -222,15 +228,15 @@ public sealed class SettingsStore
         {
             // DPAPI fails without a loaded user profile. Not saving now leaves the old file for a later run; a save
             // made anyway still keeps it as .bak-v1.
-            Problem($"The Claude API key in the old settings.json could not be encrypted ({ex.Message}). Enter it again in Settings.");
+            Problem("Store.KeyNotEncrypted", ex.Message);
         }
         return settings;
     }
 
-    void Problem(string message)
+    void Problem(string key, params object?[] args)
     {
-        LoadProblem = message;
-        Log.Error("settings: " + message);
+        _problem = (key, args);
+        Log.Error("settings: " + _loc.Format(key, args));
     }
 
     void KeepCorruptCopy()

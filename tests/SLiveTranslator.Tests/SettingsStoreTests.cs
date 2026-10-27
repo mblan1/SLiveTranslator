@@ -4,6 +4,7 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using SLiveTranslator.Models;
+using SLiveTranslator.UI;
 using Xunit;
 
 namespace SLiveTranslator.Tests;
@@ -457,6 +458,21 @@ public class SettingsStoreTests
         var reloaded = new SettingsStore(store.FilePath);
         Assert.True(reloaded.Load().General.FirstRunDone);
         Assert.Null(reloaded.LoadProblem);
+    }
+
+    [Fact]
+    public void A_load_problem_is_told_in_the_language_the_loaded_settings_choose()
+    {
+        using var dir = new TempDir();
+        var loc = new Loc(Loc.Strings(Loc.English), Loc.Strings(Loc.Vietnamese), () => "en"); // Windows in English
+        var store = new SettingsStore(dir.File("settings.json"), SecretStore.Protect, loc);
+        File.WriteAllText(store.FilePath, """{ "SchemaVersion": 2, "Ui": { "Language": "vi" }, "Overlay": { "FontSize": "big" } }""");
+
+        var s = store.Load();
+        loc.SetLanguage(s.Ui.Language); // what the app does next
+
+        Assert.Equal(loc.Format("Store.SectionsDamaged", "Overlay", Path.GetFileName(store.CorruptCopyPath)), store.LoadProblem);
+        Assert.StartsWith("Một số cài đặt", store.LoadProblem);
     }
 
     [Fact]

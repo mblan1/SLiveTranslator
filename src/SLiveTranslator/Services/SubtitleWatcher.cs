@@ -10,6 +10,7 @@ using SLiveTranslator.Capture;
 using SLiveTranslator.Models;
 using SLiveTranslator.Ocr;
 using SLiveTranslator.Translation;
+using SLiveTranslator.UI;
 using Forms = System.Windows.Forms;
 
 namespace SLiveTranslator.Services;
@@ -332,7 +333,7 @@ public sealed class SubtitleWatcher : IDisposable
                 case SubtitleTracker.NewLine line:
                     _owner.Emit(Id, line.Id, line.Text, line.LowConfidence, update: false, ct);
                     if (_last.TouchesEdge && ++_edgeLines == 2)
-                        _owner._sink.Notice("Subtitles are cut off at the top or bottom of the subtitle region, so lines are lost. Select the subtitle region again.");
+                        _owner._sink.Notice(Loc.Instance["Watcher.CutOff"]);
                     break;
                 case SubtitleTracker.LineUpdated line:
                     _owner.Emit(Id, line.Id, line.Text, line.LowConfidence, update: true, ct);

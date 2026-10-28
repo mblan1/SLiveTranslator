@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -16,6 +17,7 @@ using SLiveTranslator.Models;
 using SLiveTranslator.Ocr;
 using SLiveTranslator.Services;
 using SLiveTranslator.Translation;
+using SLiveTranslator.Translation.Providers;
 using SLiveTranslator.UI;
 using SLiveTranslator.UI.Overlay;
 using Drawing = System.Drawing;
@@ -24,8 +26,14 @@ using Forms = System.Windows.Forms;
 
 namespace SLiveTranslator;
 
-public partial class App : Application
+public partial class App : Application, ISettingsHost
 {
+    /// <summary>How long "Preview on screen" shows its sample subtitle.</summary>
+    static readonly TimeSpan PreviewTime = TimeSpan.FromSeconds(5);
+
+    /// <summary>How long the minimized main window gets to hand the foreground to the window behind it.</summary>
+    static readonly TimeSpan MainWindowAsideTime = TimeSpan.FromMilliseconds(300);
+
     readonly SettingsStore _store = new(DataPaths.Current.SettingsFile);
     readonly DailyCharCounter _myMemoryUsage = new(DataPaths.Current.MyMemoryUsageFile);
     readonly ProviderRegistry _providers;
@@ -46,7 +54,14 @@ public partial class App : Application
     ScreenTranslator? _screenTranslator;
     CancellationTokenSource? _screenCts;
     DispatcherTimer? _clearTimer;
+    DispatcherTimer? _previewTimer;
     Mutex? _singleInstance;
+
+    /// <summary>The main window while it is open. Typed as a plain Window: a run that never opens it never loads WPF-UI.</summary>
+    Window? _mainWindow;
+
+    /// <summary>Why the selected provider does not translate right now (no key, not answering); null while it does.</summary>
+    string? _providerProblem;
 
     public App()
     {
@@ -97,8 +112,8 @@ public partial class App : Application
         _providers.ServiceSwitched += OnServiceSwitched;
         _myMemoryUsage.Counted += OnMyMemoryCounted;
 
-        _presenter = new SubtitlePresenter(Dispatcher, _overlay, () => _subtitles?.Region ?? default, () => _settings.Overlay.FontSize,
-            () => _settings.Overlay.MaxLines, () => Hotkey(HotkeyAction.History), ShowError,
+        _presenter = new SubtitlePresenter(Dispatcher, _overlay, () => _subtitles?.Region ?? default, () => _settings.Overlay,
+            () => Hotkey(HotkeyAction.History), ShowError,
             notice => _notifier.Notify(NoticeCategory.Warning, Loc.F("Notice.FixRegion", notice, Hotkey(HotkeyAction.SelectRegion)), _subtitles?.Region),
             ShowLiveBadge);
         _screenTranslator = new ScreenTranslator(() => _ocr!, () => _translator!, Langs, ForegroundProfile);
@@ -118,11 +133,11 @@ public partial class App : Application
         };
         if (RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
 
-        // Shown before the first-run settings window, so a reset to defaults is explained before the user saves over it.
+        // Shown before the first-run window, so a reset to defaults is explained before the user saves over it.
         ShowProblems(problems);
         if (!_settings.General.FirstRunDone)
         {
-            ShowSettings();
+            ShowMainWindow();
             return;
         }
         string keys = Loc.F("Notice.Keys", Hotkey(HotkeyAction.ToggleSubtitles), Hotkey(HotkeyAction.TranslateScreen), Hotkey(HotkeyAction.History));
@@ -193,23 +208,34 @@ public partial class App : Application
     /// <returns>Problems for the user, already logged. The caller shows them: at startup the overlay does not exist yet.</returns>
     List<string> BuildServices()
     {
-        var problems = new List<string>();
+        var problems = BuildOcr();
+        problems.AddRange(ApplyProviders());
+        return problems;
+    }
+
+    List<string> BuildOcr()
+    {
         try
         {
             _ocr = WindowsOcrEngine.Create(_settings.General.OcrLanguage);
+            return [];
         }
         catch (Exception ex)
         {
             _ocr = null;
             Log.Error("ocr init: " + ex);
-            problems.Add(ex.Message);
+            return [ex.Message];
         }
+    }
 
-        // The selected provider, then the free services (alone while its key is missing), behind the one cache of the run.
-        var notice = _providers.Apply(_settings).Notice;
-        if (notice is not null) problems.Add(notice); // the registry logged it
+    /// <summary>The selected provider, then the free services (alone while its key is missing), behind the one cache of the run.</summary>
+    List<string> ApplyProviders()
+    {
+        var notice = _providers.Apply(_settings).Notice; // the registry logged it
         _translator = _providers.Cache;
-        return problems;
+        _providerProblem = notice;
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        return notice is null ? [] : [notice];
     }
 
     /// <summary>The selected provider gave way to the free services, or came back (see <see cref="AlertRules.ServiceSwitched"/>).</summary>
@@ -219,6 +245,9 @@ public partial class App : Application
         string id = _settings.Translation.Provider;
         string name = _providers.Providers.FirstOrDefault(p => p.Id.Equals(id, StringComparison.OrdinalIgnoreCase))?.DisplayName ?? e.From;
         _alerts.ServiceSwitched(e, _translator.Name, name, _subtitles?.Region);
+        if (e.From == _translator.Name && e.Reason.Length > 0) _providerProblem = Loc.F("Alert.ProviderDown", name, AlertRules.Reason(e.Status));
+        else if (e.To == _translator.Name && e.Reason.Length == 0) _providerProblem = null;
+        StateChanged?.Invoke(this, EventArgs.Empty);
     });
 
     /// <summary>MyMemory counted characters on a translation thread; its quota is checked on the UI thread, where the settings live.</summary>
@@ -226,6 +255,7 @@ public partial class App : Application
     {
         string email = _settings.Translation.Free.MyMemoryEmail;
         _alerts.MyMemoryUsage(today, MyMemoryTranslator.DailyLimitFor(email), hasEmail: !string.IsNullOrWhiteSpace(email));
+        StateChanged?.Invoke(this, EventArgs.Empty);
     });
 
     bool IsOwnWindow(IntPtr hwnd) =>
@@ -252,13 +282,14 @@ public partial class App : Application
         Item("Tray.SelectRegion", () => SelectRegion());
         Item("Tray.Clear", ClearOverlay);
         menu.Items.Add(new Forms.ToolStripSeparator());
-        Item("Tray.Settings", ShowSettings);
+        Item("Tray.Settings", ShowMainWindow);
+        Item("Tray.SettingsClassic", ShowClassicSettings);
         Item("Tray.OpenDataFolder", () =>
         {
             Directory.CreateDirectory(DataPaths.Current.Root);
             Process.Start("explorer.exe", DataPaths.Current.Root);
         });
-        Item("Tray.Exit", Shutdown);
+        Item("Tray.Exit", ExitApp);
 
         _tray = new Forms.NotifyIcon
         {
@@ -267,7 +298,7 @@ public partial class App : Application
             Visible = true,
             ContextMenuStrip = menu,
         };
-        _tray.DoubleClick += (_, _) => ShowSettings();
+        _tray.DoubleClick += (_, _) => ShowMainWindow();
     }
 
     /// <summary>The tray in the language just chosen.</summary>
@@ -409,6 +440,7 @@ public partial class App : Application
         if (_tray is null) return;
         _tray.Icon = on ? _iconLive : _iconIdle;
         _tray.Text = Loc.Instance[on ? "Tray.TooltipLive" : "Tray.Tooltip"];
+        StateChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>A whole-screen "subtitle" re-translates every HUD change, is slow, and burns the free daily quota in minutes.</summary>
@@ -433,13 +465,26 @@ public partial class App : Application
         StopSubtitles();
         var screen = Forms.Screen.FromPoint(Forms.Cursor.Position);
         var dialog = new RegionSelectWindow(screen);
-        if (dialog.ShowDialog() != true || dialog.Result is not { } rect)
+        // Started from the main window, which would cover the game where the subtitles are: it steps aside while the
+        // user drags and comes back after. Started in the game (the hotkey) it is left as it is: bringing it back
+        // would take the focus from the game, and the subtitles would start paused.
+        var main = _mainWindow is { IsActive: true } active ? active : null;
+        var mainState = main?.WindowState;
+        if (main is not null) main.WindowState = WindowState.Minimized;
+        bool picked = dialog.ShowDialog() == true;
+        if (main is not null && mainState is { } state)
+        {
+            main.WindowState = state;
+            main.Activate();
+        }
+        if (!picked || dialog.Result is not { } rect)
         {
             if (wasRunning) StartSubtitles(restart: true);
             return null;
         }
         _settings.Subtitles.Region = RegionSettings.From(rect);
         TrySaveSettings();
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
         if (!WarnIfLargeRegion(rect)) _notifier.Feedback(NoticeCategory.Status, Loc.Instance["Notice.RegionSaved"], rect);
         if (wasRunning) StartSubtitles(restart: true);
         return rect;
@@ -457,7 +502,43 @@ public partial class App : Application
         _notifier.Feedback(NoticeCategory.Status, Loc.Instance[wasRunning ? "Notice.ClearedSubtitlesOff" : "Notice.Cleared"], GameArea(), StatusKind.Off);
     }
 
-    void ShowSettings()
+    void ShowMainWindow()
+    {
+        if (_mainWindow is { } open)
+        {
+            if (open.WindowState == WindowState.Minimized) open.WindowState = WindowState.Normal;
+            open.Activate();
+            return;
+        }
+        var window = _mainWindow = OpenMainWindow();
+        window.Closed += (_, _) =>
+        {
+            _mainWindow = null;
+            if (_settings.General.FirstRunDone) return;
+            _settings.General.FirstRunDone = true; // the first run showed the window; the next run starts in the tray
+            TrySaveSettings();
+        };
+    }
+
+    /// <summary>Kept out of <see cref="ShowMainWindow"/>: WPF-UI and the view models load only when this runs.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    Window OpenMainWindow() => UI.MainWindow.Open(new SettingsViewModel(this), _settings.General.Theme);
+
+    /// <summary>Exit from the tray: unsaved edits in the main window are dropped without asking (WPF closes it on shutdown).</summary>
+    void ExitApp()
+    {
+        if (_mainWindow is not null) SkipUnsavedQuestion(_mainWindow);
+        Shutdown();
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static void SkipUnsavedQuestion(Window window) => ((UI.MainWindow)window).SkipUnsavedQuestion = true;
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static void ApplyTheme(Window window, AppTheme theme) => ((UI.MainWindow)window).ApplyTheme(theme);
+
+    /// <summary>The settings window of before the main window, kept reachable until the main window has every page.</summary>
+    void ShowClassicSettings()
     {
         if (Windows.OfType<SettingsWindow>().FirstOrDefault() is { } open)
         {
@@ -473,6 +554,8 @@ public partial class App : Application
         var problems = BuildServices();
         if (RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
         if (restart) StartSubtitles(restart: true);
+        _presenter?.Restyle();
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
         if (problems.Count > 0) ShowProblems(problems);
         else if (!restart) _notifier.Feedback(NoticeCategory.Status, Loc.Instance["Notice.SettingsSaved"], Forms.Screen.PrimaryScreen?.Bounds);
     }
@@ -482,6 +565,134 @@ public partial class App : Application
     /// tray notifications while a game is in front. A failure of what the user just did is Feedback instead.
     /// </summary>
     void ShowError(string message) => _notifier.Notify(NoticeCategory.Error, message);
+
+    // ---- the main window's view of the app (ISettingsHost) ----
+
+    public event EventHandler? SettingsChanged;
+    public event EventHandler? StateChanged;
+
+    AppSettings ISettingsHost.Current => _settings;
+
+    SaveResult ISettingsHost.Save(AppSettings settings, SettingsChange changes)
+    {
+        try
+        {
+            _store.Save(settings);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Error("settings: " + ex.Message);
+            return new SaveResult(false, [Loc.F("Notice.SettingsNotSaved", ex.Message)]);
+        }
+        _settings = settings;
+        return new SaveResult(true, ApplyChanges(changes));
+    }
+
+    /// <summary>Redoes what the saved settings changed, and only that (see <see cref="SaveActions"/>).</summary>
+    /// <returns>Problems for the user, already logged.</returns>
+    List<string> ApplyChanges(SettingsChange changes)
+    {
+        var problems = new List<string>();
+        var redo = SaveActions.For(changes, _subtitles?.IsRunning == true);
+        if (redo.Language) Loc.Instance.SetLanguage(_settings.Ui.Language);
+        if (redo.Log)
+        {
+            Log.Level = _settings.Storage.LogLevel;
+            Log.MaxBytes = Math.Max(64, _settings.Storage.LogMaxKB) * 1024L;
+        }
+        if (redo.RestartSubtitles) StopSubtitles();
+        if (redo.RebuildOcr) problems.AddRange(BuildOcr());
+        if (redo.RebuildProviders) problems.AddRange(ApplyProviders());
+        if (redo.RegisterHotkeys && RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
+        if (redo.Restyle) _presenter?.Restyle();
+        if (redo.Theme && _mainWindow is not null) ApplyTheme(_mainWindow, _settings.General.Theme);
+        if (redo.RestartSubtitles) StartSubtitles(restart: true);
+        Log.Write($"settings: saved ({changes})");
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        return problems;
+    }
+
+    IReadOnlyList<ITranslationProvider> ISettingsHost.Providers =>
+        _providers.Providers.Select(p => p.Provider).OfType<ITranslationProvider>().ToList();
+
+    GameProfileStore ISettingsHost.Profiles => _profiles;
+
+    async Task<TestTranslation> ISettingsHost.TestTranslationAsync(AppSettings settings, string line, CancellationToken ct)
+    {
+        // Built apart from the chain in use and without the cache: the answer comes from the service itself, and a
+        // failure of the tested key raises no alert about the provider in use.
+        var chain = _providers.BuildDetached(settings.Translation);
+        string src = LangCodes.FromOcrTag(_ocr?.LanguageTag);
+        string tgt = string.IsNullOrWhiteSpace(settings.General.TargetLanguage) ? "en" : settings.General.TargetLanguage;
+        var profile = _profiles.Resolve(settings.Translation.ProfileId, "witcher3", src, tgt); // the sample is a Witcher line
+        var result = await Task.Run(() => chain.Translator.TranslateAsync(new TranslateRequest([line], src, tgt, [], profile), ct), ct);
+        return new TestTranslation(result.Texts[0], result.ProviderAt(0) ?? chain.Translator.Name, chain.Notice);
+    }
+
+    bool ISettingsHost.SubtitlesOn => _subtitles?.IsRunning == true;
+
+    void ISettingsHost.SetSubtitles(bool on)
+    {
+        if (on != (_subtitles?.IsRunning == true)) ToggleSubtitles();
+    }
+
+    ProviderStatus ISettingsHost.ProviderStatus =>
+        _providerProblem is { } problem ? new ProviderStatus(problem, false) : new ProviderStatus(Loc.Instance["Home.StatusReady"], true);
+
+    FreeServiceStatus ISettingsHost.FreeServices =>
+        new(_providers.Google.BlockedUntilUtc?.ToLocalTime(), _myMemoryUsage.Today, MyMemoryTranslator.DailyLimitFor(_settings.Translation.Free.MyMemoryEmail));
+
+    HotkeyResult? ISettingsHost.HotkeyState(HotkeyAction action) => _hotkeys?.State(action);
+
+    void ISettingsHost.SelectRegion() => SelectRegion();
+
+    /// <summary>
+    /// The Home page's "Translate screen": the main window steps aside first, so what is read is the window behind it
+    /// (the game), as with the hotkey, and not the screen behind the settings with the labels drawn over them.
+    /// </summary>
+    async void ISettingsHost.TranslateScreen()
+    {
+        if (_mainWindow is { IsActive: true } main)
+        {
+            main.WindowState = WindowState.Minimized; // Windows activates the window behind it
+            await Task.Delay(MainWindowAsideTime);
+        }
+        TranslateScreen();
+    }
+
+    void ISettingsHost.ToggleHistory() => ToggleHistory();
+
+    /// <summary>A sample subtitle in this look at the subtitle region (or where one would be), for a few seconds.</summary>
+    void ISettingsHost.PreviewOverlay(OverlaySettings look)
+    {
+        if (_overlay is null) return;
+        var screen = Forms.Screen.PrimaryScreen!.Bounds;
+        var region = _settings.Subtitles.Region?.ToRectangle()
+                     ?? new DRect(screen.Left + screen.Width / 5, screen.Bottom - screen.Height / 4, screen.Width * 3 / 5, screen.Height / 12);
+        var lines = PreviewLines().TakeLast(Math.Clamp(look.MaxLines, 1, 5)).ToList();
+        _overlay.ShowSubtitleLines(lines, region, look.FontSize, SubtitleStyle.From(look));
+        if (_previewTimer is null)
+        {
+            _previewTimer = new DispatcherTimer { Interval = PreviewTime };
+            _previewTimer.Tick += (_, _) =>
+            {
+                _previewTimer.Stop();
+                // The sample goes; running subtitles get their own lines back.
+                _overlay?.HideSubtitle();
+                if (_subtitles?.IsRunning == true) _presenter?.Restyle();
+            };
+        }
+        _previewTimer.Stop();
+        _previewTimer.Start();
+    }
+
+    /// <summary>Two earlier lines and the newest, each with the game's English under it when the look shows the original.</summary>
+    static IReadOnlyList<SubtitleLineView> PreviewLines() =>
+    [
+        new(Loc.Instance["Overlay.Sample1"], false, Original: "Wind's howling."),
+        new(Loc.Instance["Overlay.Sample2"], false, Original: "We should find shelter before nightfall."),
+        new(Loc.Instance["Overlay.Sample3"], false, Original: "Roach is tired, and so am I."),
+    ];
 
     void OnExit(object sender, ExitEventArgs e)
     {

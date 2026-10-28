@@ -39,7 +39,8 @@ public sealed class OverlayHost
     // ---- subtitles ----
 
     /// <summary>Shows the latest dialog lines (oldest first, newest last and brightest) next to the watched region.</summary>
-    public void ShowSubtitleLines(IReadOnlyList<SubtitleLineView> lines, DRect regionPx, int fontSize)
+    /// <param name="style">The look the overlay settings ask for; null for the default one.</param>
+    public void ShowSubtitleLines(IReadOnlyList<SubtitleLineView> lines, DRect regionPx, int fontSize, SubtitleStyle? style = null)
     {
         if (lines.Count == 0)
         {
@@ -48,7 +49,7 @@ public sealed class OverlayHost
         }
         Restore();
         _screen = Forms.Screen.FromRectangle(regionPx);
-        (_subtitle ??= new SubtitleOverlay()).ShowLines(lines, regionPx, fontSize);
+        (_subtitle ??= new SubtitleOverlay()).ShowLines(lines, regionPx, fontSize, style);
     }
 
     public void HideSubtitle() => _subtitle?.Dismiss();

@@ -1,0 +1,97 @@
+<Page x:Class="SLiveTranslator.UI.Pages.HomePage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:l="clr-namespace:SLiveTranslator.UI"
+      Title="{Binding [Nav.Home], Source={x:Static l:Loc.Instance}}">
+    <Page.Resources>
+        <ResourceDictionary Source="PageStyles.xaml"/>
+    </Page.Resources>
+    <StackPanel Margin="24,12,24,24">
+        <TextBlock Style="{StaticResource PageTitle}" Text="{Binding [Home.Title], Source={x:Static l:Loc.Instance}}"/>
+
+        <ui:CardControl Icon="{ui:SymbolIcon ClosedCaption24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Home.Subtitles], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Home.SubtitlesHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ui:ToggleSwitch IsChecked="{Binding SubtitlesOn}"/>
+        </ui:CardControl>
+
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Style="{StaticResource SectionTitle}" Text="{Binding [Home.Provider], Source={x:Static l:Loc.Instance}}"/>
+                <TextBlock Style="{StaticResource Body}" FontSize="15" Text="{Binding ProviderLine}"/>
+                <TextBlock Style="{StaticResource Hint}" Text="{Binding ProviderStatusText}"
+                           Visibility="{Binding ProviderStatusOk, Converter={StaticResource VisibleWhen}}"/>
+                <TextBlock Style="{StaticResource Caution}" Text="{Binding ProviderStatusText}"
+                           Visibility="{Binding ProviderStatusOk, Converter={StaticResource VisibleWhen}, ConverterParameter=not}"/>
+            </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Style="{StaticResource SectionTitle}" Text="{Binding [Home.FreeServices], Source={x:Static l:Loc.Instance}}"/>
+                <TextBlock Style="{StaticResource Body}" Text="{Binding GoogleStatus}"/>
+                <TextBlock Style="{StaticResource Body}" Margin="0,8,0,4" Text="{Binding MyMemoryText}"/>
+                <ProgressBar Height="6" Maximum="1" Value="{Binding MyMemoryFraction, Mode=OneWay}" Margin="0,0,0,12"/>
+                <TextBlock Style="{StaticResource Body}" FontWeight="SemiBold" Margin="0,0,0,4"
+                           Text="{Binding [Home.RecommendTitle], Source={x:Static l:Loc.Instance}}"/>
+                <ItemsControl ItemsSource="{Binding Recommendations}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel Margin="0,2">
+                                <TextBlock DockPanel.Dock="Left" Width="22" Style="{StaticResource Body}" Text="{Binding Number, StringFormat={}{0}.}"/>
+                                <TextBlock DockPanel.Dock="Right" Margin="8,0,0,0" Style="{StaticResource Body}" Text="✓"
+                                           Foreground="{DynamicResource SystemFillColorSuccessBrush}"
+                                           Visibility="{Binding Done, Converter={StaticResource VisibleWhen}}"/>
+                                <TextBlock Style="{StaticResource Body}" Text="{Binding Text}"/>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Style="{StaticResource SectionTitle}" Text="{Binding [Home.QuickActions], Source={x:Static l:Loc.Instance}}"/>
+                <WrapPanel>
+                    <ui:Button Margin="0,0,8,8" Icon="{ui:SymbolIcon SelectObject24}" Command="{Binding SelectRegionCommand}"
+                               Content="{Binding [Action.SelectRegion], Source={x:Static l:Loc.Instance}}"/>
+                    <ui:Button Margin="0,0,8,8" Icon="{ui:SymbolIcon ScanText24}" Command="{Binding TranslateScreenCommand}"
+                               Content="{Binding [Action.TranslateScreen], Source={x:Static l:Loc.Instance}}"/>
+                    <ui:Button Margin="0,0,8,8" Icon="{ui:SymbolIcon History24}" Command="{Binding HistoryCommand}"
+                               Content="{Binding [Home.ShowHistory], Source={x:Static l:Loc.Instance}}"/>
+                </WrapPanel>
+            </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Style="{StaticResource SectionTitle}" Text="{Binding [Home.Hotkeys], Source={x:Static l:Loc.Instance}}"/>
+                <ItemsControl ItemsSource="{Binding Hotkeys}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,3">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="200"/>
+                                    <ColumnDefinition Width="180"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Style="{StaticResource Body}" Text="{Binding Action}"/>
+                                <TextBlock Grid.Column="1" Style="{StaticResource Body}" FontFamily="Consolas" Text="{Binding Gesture}"/>
+                                <TextBlock Grid.Column="2" Style="{StaticResource Hint}" Text="{Binding State}"
+                                           Visibility="{Binding Ok, Converter={StaticResource VisibleWhen}}"/>
+                                <TextBlock Grid.Column="2" Style="{StaticResource Caution}" Text="{Binding State}"
+                                           Visibility="{Binding Ok, Converter={StaticResource VisibleWhen}, ConverterParameter=not}"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+    </StackPanel>
+</Page>

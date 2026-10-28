@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
 using SLiveTranslator.Capture;
@@ -18,6 +19,8 @@ namespace SLiveTranslator.UI.Overlay;
 /// </summary>
 public class ClickThroughWindow : Window
 {
+    static readonly Style[] PlainStyles = [Sealed(typeof(TextBlock)), Sealed(typeof(Border)), Sealed(typeof(StackPanel)), Sealed(typeof(Canvas))];
+
     DPoint? _placedAt;
 
     public ClickThroughWindow()
@@ -33,7 +36,17 @@ public class ClickThroughWindow : Window
         IsHitTestVisible = false;
         WindowStartupLocation = WindowStartupLocation.Manual;
         SizeToContent = SizeToContent.WidthAndHeight;
+        // The main window merges WPF-UI's implicit styles into the app's resources; these empty ones come first for
+        // the overlay's own elements, so they keep the look set here whatever the app's theme.
+        foreach (var style in PlainStyles) Resources[style.TargetType] = style;
         SourceInitialized += (_, _) => MakeClickThrough();
+    }
+
+    static Style Sealed(Type type)
+    {
+        var style = new Style(type);
+        style.Seal();
+        return style;
     }
 
     /// <summary>The window handle; the window is created (hidden) on first use, so it can be placed before it shows.</summary>

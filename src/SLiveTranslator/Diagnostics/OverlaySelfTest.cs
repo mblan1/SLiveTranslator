@@ -1,15 +1,20 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Threading;
 using SLiveTranslator.Capture;
 using SLiveTranslator.Models;
 using SLiveTranslator.UI;
 using SLiveTranslator.UI.Overlay;
+using SLiveTranslator.UI.Pages;
 using DRect = System.Drawing.Rectangle;
 using Forms = System.Windows.Forms;
 
@@ -17,8 +22,10 @@ namespace SLiveTranslator.Diagnostics;
 
 /// <summary>
 /// --selftest: shows every overlay window with sample content, saves a screen capture and a rendering of each window,
-/// and checks that each one is hidden from screen capture, has a transparent background, and lies on the monitor,
-/// also after the settings window was opened and closed (a theme applied to the app's windows must not reach them).
+/// and checks that each one is hidden from screen capture, has a transparent background, and lies on the monitor.
+/// Then it opens the main window, shows each of its pages, checks that it is hidden from capture and took WPF-UI's
+/// theme, and checks the overlays again after it closed: the theme applied to it must not reach them. Last, the classic
+/// settings window, whose text must stay readable with WPF-UI's dark styles in the app's resources.
 /// </summary>
 internal static class OverlaySelfTest
 {
@@ -60,12 +67,9 @@ internal static class OverlaySelfTest
         var failures = new List<string>();
         Check(overlay, area, "shown", outDir, report, failures);
 
-        var settings = new SettingsWindow(new AppSettings(), () => null, () => { });
-        settings.Show();
-        await Task.Delay(300);
-        settings.Close();
-        await Task.Delay(200);
-        Check(overlay, area, "after the settings window", null, report, failures);
+        await CheckMainWindowAsync(outDir, report, failures);
+        Check(overlay, area, "after the main window", null, report, failures);
+        await CheckClassicWindowAsync(outDir, report, failures);
 
         report.Add(failures.Count == 0 ? "PASS" : $"FAIL ({failures.Count})");
         report.AddRange(failures);
@@ -73,6 +77,153 @@ internal static class OverlaySelfTest
         foreach (var line in report) Console.WriteLine(line);
         overlay.Close();
         return failures.Count == 0 ? 0 : 3;
+    }
+
+    /// <summary>The main window on default settings (see <see cref="SelfTestHost"/>), every page shown once, then closed.</summary>
+    static async Task CheckMainWindowAsync(string outDir, List<string> report, List<string> failures)
+    {
+        var errors = new List<string>();
+        void OnError(object? sender, DispatcherUnhandledExceptionEventArgs e)
+        {
+            errors.Add(e.Exception.GetType().Name + ": " + e.Exception.Message);
+            e.Handled = true;
+        }
+        var bindings = new BindingErrors();
+        PresentationTraceSources.Refresh(); // without a debugger WPF traces nothing until asked
+        PresentationTraceSources.DataBindingSource.Switch.Level = SourceLevels.Warning;
+        PresentationTraceSources.DataBindingSource.Listeners.Add(bindings);
+        Application.Current.DispatcherUnhandledException += OnError;
+        try
+        {
+            var vm = new SettingsViewModel(new SelfTestHost(outDir));
+            // A provider card on the Translation page, so its bindings are shown too (no key: nothing is checked).
+            vm.Translation.SelectedProvider = vm.Translation.ProviderChoices.First(c => c.Value == ProviderIds.Claude);
+            var main = MainWindow.Open(vm, AppTheme.System);
+            await Task.Delay(800);
+            bool themed = Wpf.Ui.UiApplication.Current.IsApplication && ReferenceEquals(Application.Current.MainWindow, main);
+            report.Add($"main window: visible={main.IsVisible} excludedFromCapture={main.ExcludedFromCapture} themed={themed}");
+            if (!main.ExcludedFromCapture) failures.Add("the main window is not hidden from screen capture");
+            if (!themed) failures.Add("WPF-UI's theme does not reach the main window (it is not the app's MainWindow, or the dictionaries came too late)");
+            foreach (var page in new[]
+                     {
+                         typeof(TranslationPage), typeof(GameProfilePage), typeof(SubtitlesPage), typeof(OverlayPage), typeof(HotkeysPage),
+                         typeof(NotificationsPage), typeof(StoragePage), typeof(GeneralPage), typeof(HomePage),
+                     })
+            {
+                bool shown = main.RootNavigation.Navigate(page);
+                await Task.Delay(300);
+                report.Add($"main window: page {page.Name} shown={shown}");
+                if (!shown) failures.Add($"the main window did not show the page {page.Name}");
+                SaveRendering(main, Path.Combine(outDir, $"selftest_main_{page.Name}.png"));
+            }
+            // Each theme switch repaints the app's MainWindow: it must land on the main window, never on an overlay.
+            main.Show(Loc.Instance["Main.Saved"], "", MessageKind.Success); // the snackbar a save shows
+            await Task.Delay(700);
+            SaveRendering(main, Path.Combine(outDir, "selftest_main_snackbar.png"));
+            foreach (var theme in new[] { AppTheme.Dark, AppTheme.Light, AppTheme.System })
+            {
+                main.ApplyTheme(theme);
+                await Task.Delay(200);
+            }
+            report.Add($"main window: theme after Dark, Light, System = {Wpf.Ui.Appearance.ApplicationThemeManager.GetAppTheme()}");
+            main.ApplyTheme(AppTheme.Dark); // the classic window is checked next in the theme whose text is white
+            await Task.Delay(200);
+            vm.Discard();
+            main.Close();
+            await Task.Delay(300);
+            if (ReferenceEquals(Application.Current.MainWindow, main)) failures.Add("the closed main window is still the app's MainWindow");
+        }
+        finally
+        {
+            Application.Current.DispatcherUnhandledException -= OnError;
+            PresentationTraceSources.DataBindingSource.Listeners.Remove(bindings);
+        }
+        foreach (var error in errors) failures.Add("main window: " + error);
+        report.Add($"main window: {bindings.Messages.Count} binding errors");
+        report.AddRange(bindings.Messages.Distinct().Select(m => "  binding: " + m));
+    }
+
+    /// <summary>
+    /// The classic settings window after the main window closed in the dark theme: WPF-UI's implicit styles stay in the
+    /// app's resources, white text included, and its buttons and list items must keep the plain look on its white background.
+    /// </summary>
+    static async Task CheckClassicWindowAsync(string outDir, List<string> report, List<string> failures)
+    {
+        var classic = new SettingsWindow(new AppSettings(), () => null, () => { }) { Topmost = false, ShowActivated = false };
+        classic.Show();
+        await Task.Delay(400);
+        SaveRendering(classic, Path.Combine(outDir, "selftest_classic.png"));
+        var backdrop = (classic.Background as SolidColorBrush)?.Color ?? Colors.White;
+        int count = 0;
+        foreach (var control in LogicalDescendants(classic).OfType<Control>().Where(c => c is Button or ComboBoxItem))
+        {
+            count++;
+            if (Contrast(control.Foreground, control.Background, backdrop) is { } contrast && contrast < 3)
+                failures.Add($"classic window: the {control.GetType().Name} '{(control as ContentControl)?.Content}' is unreadable (contrast {contrast:0.0}:1)");
+        }
+        report.Add($"classic window: {count} buttons and list items checked");
+        if (count == 0) failures.Add("classic window: no button or list item found to check");
+        classic.Close();
+    }
+
+    static IEnumerable<DependencyObject> LogicalDescendants(DependencyObject parent)
+    {
+        foreach (var child in LogicalTreeHelper.GetChildren(parent).OfType<DependencyObject>())
+        {
+            yield return child;
+            foreach (var below in LogicalDescendants(child)) yield return below;
+        }
+    }
+
+    /// <summary>The WCAG contrast of the text on its background laid over <paramref name="backdrop"/>; null for brushes that are not plain colours.</summary>
+    static double? Contrast(Brush? foreground, Brush? background, Color backdrop)
+    {
+        if (foreground is not SolidColorBrush fg) return null;
+        var under = background switch
+        {
+            null => backdrop,
+            SolidColorBrush bg => Over(bg.Color, backdrop),
+            _ => (Color?)null,
+        };
+        if (under is not { } back) return null;
+        double a = Luminance(Over(fg.Color, back)), b = Luminance(back);
+        return (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
+    }
+
+    static Color Over(Color top, Color bottom)
+    {
+        double t = top.A / 255.0;
+        byte Mix(byte x, byte y) => (byte)Math.Round(x * t + y * (1 - t));
+        return Color.FromRgb(Mix(top.R, bottom.R), Mix(top.G, bottom.G), Mix(top.B, bottom.B));
+    }
+
+    static double Luminance(Color c)
+    {
+        static double Channel(byte v) => v / 255.0 <= 0.03928 ? v / 255.0 / 12.92 : Math.Pow((v / 255.0 + 0.055) / 1.055, 2.4);
+        return 0.2126 * Channel(c.R) + 0.7152 * Channel(c.G) + 0.0722 * Channel(c.B);
+    }
+
+    static void SaveRendering(Window window, string path)
+    {
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(Render(window)));
+        using var file = File.Create(path);
+        encoder.Save(file);
+    }
+
+    /// <summary>What WPF reports about bindings that do not work, for the report.</summary>
+    sealed class BindingErrors : TraceListener
+    {
+        public List<string> Messages { get; } = new();
+
+        public override void Write(string? message)
+        {
+        }
+
+        public override void WriteLine(string? message)
+        {
+            if (message is not null) Messages.Add(message);
+        }
     }
 
     static void Check(OverlayHost overlay, DRect screen, string phase, string? saveDir, List<string> report, List<string> failures)

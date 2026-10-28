@@ -203,4 +203,29 @@ public class OverlayHostTests
         Assert.False(Window("badge").IsVisible);
         Assert.False(Window("toast").IsVisible);
     });
+
+    [Fact]
+    public void The_subtitle_box_takes_the_look_of_the_overlay_settings() => OnStaThread(overlay =>
+    {
+        var screen = Forms.Screen.PrimaryScreen!.Bounds;
+        var region = new DRect(screen.Left + 400, screen.Top + 500, 800, 100);
+        SubtitleLineView[] lines = [new("Con đường phía trước rất nguy hiểm.", false, Original: "The road ahead is dangerous.")];
+
+        overlay.ShowSubtitleLines(lines, region, 22, new SubtitleStyle(0.5, 0.25, SubtitlePosition.BottomCenter, ShowOriginal: true));
+        Pump(TimeSpan.FromMilliseconds(100));
+        var window = overlay.Windows.Single(w => w.Name == "subtitles").Window;
+        var line = Lines(overlay)[0];
+        Assert.Equal(0.5, line.Opacity, 3);
+        Assert.Equal(64, ((System.Windows.Media.SolidColorBrush)((Border)window.Content).Background).Color.A);
+        Assert.Contains("The road ahead is dangerous.", new System.Windows.Documents.TextRange(line.ContentStart, line.ContentEnd).Text);
+        Assert.True(Native.GetWindowRect(window.Handle, out var bottom));
+        Assert.InRange(bottom.Bottom, screen.Bottom - screen.Height / 10, screen.Bottom - screen.Height / 25);
+        Assert.InRange((bottom.Left + bottom.Right) / 2, (screen.Left + screen.Right) / 2 - 3, (screen.Left + screen.Right) / 2 + 3);
+
+        overlay.ShowSubtitleLines(lines, region, 22, new SubtitleStyle(1, 0.8, SubtitlePosition.AboveRegion, ShowOriginal: false));
+        Pump(TimeSpan.FromMilliseconds(100));
+        Assert.Equal("Con đường phía trước rất nguy hiểm.", Lines(overlay)[0].Text);
+        Assert.True(Native.GetWindowRect(window.Handle, out var above));
+        Assert.True(above.Bottom <= region.Top, $"lines {above.ToRectangle()} are not above the region {region}");
+    });
 }

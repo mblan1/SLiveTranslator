@@ -1,3 +1,4 @@
+using System;
 using System.Windows.Media;
 
 namespace SLiveTranslator.UI.Overlay;
@@ -25,6 +26,17 @@ internal static class OverlayLook
     static readonly Brush AccentOff = Frozen(0xFF, 0x9E, 0x9E, 0x9E);
     static readonly Brush AccentWarning = Frozen(0xFF, 0xFF, 0xB3, 0x00);
     static readonly Brush AccentError = Frozen(0xFF, 0xF4, 0x43, 0x36);
+
+    static Brush _subtitleBackground = SubtitleBackground;
+
+    /// <summary>The subtitle box's background at an opacity (0 to 1); the brush of the last opacity asked for is kept, so a line allocates none.</summary>
+    public static Brush SubtitleBackgroundAt(double opacity)
+    {
+        byte alpha = (byte)Math.Round(Math.Clamp(opacity, 0, 1) * 255);
+        var brush = _subtitleBackground;
+        if (((SolidColorBrush)brush).Color.A != alpha) _subtitleBackground = brush = Frozen(alpha, 0x10, 0x14, 0x18);
+        return brush;
+    }
 
     /// <summary>The colour of a toast's bottom edge.</summary>
     public static Brush Accent(StatusKind kind) => kind switch

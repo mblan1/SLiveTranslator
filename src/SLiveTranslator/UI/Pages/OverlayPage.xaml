@@ -1,0 +1,101 @@
+<Page x:Class="SLiveTranslator.UI.Pages.OverlayPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:l="clr-namespace:SLiveTranslator.UI"
+      Title="{Binding [Nav.Overlay], Source={x:Static l:Loc.Instance}}">
+    <Page.Resources>
+        <ResourceDictionary Source="PageStyles.xaml"/>
+    </Page.Resources>
+    <StackPanel Margin="24,12,24,24">
+        <TextBlock Style="{StaticResource PageTitle}" Text="{Binding [Overlay.Title], Source={x:Static l:Loc.Instance}}"/>
+
+        <ui:CardControl Icon="{ui:SymbolIcon Eye24}" Margin="0,0,0,16">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Overlay.Preview], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Overlay.PreviewHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ui:Button Appearance="Primary" Icon="{ui:SymbolIcon Play24}" Command="{Binding PreviewCommand}"
+                       Content="{Binding [Overlay.PreviewButton], Source={x:Static l:Loc.Instance}}"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon TextFont24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <TextBlock Style="{StaticResource Body}" Text="{Binding [Overlay.FontSize], Source={x:Static l:Loc.Instance}}"/>
+            </ui:CardControl.Header>
+            <ui:NumberBox Width="140" Minimum="10" Maximum="80" SmallChange="1" MaxDecimalPlaces="0"
+                          Value="{Binding FontSize, UpdateSourceTrigger=PropertyChanged}"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon ClosedCaption24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Overlay.MaxLines], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Overlay.MaxLinesHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ui:NumberBox Width="140" Minimum="1" Maximum="5" SmallChange="1" MaxDecimalPlaces="0"
+                          Value="{Binding MaxLines, UpdateSourceTrigger=PropertyChanged}"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon TextFont24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <TextBlock Style="{StaticResource Body}" Text="{Binding [Overlay.TextOpacity], Source={x:Static l:Loc.Instance}}"/>
+            </ui:CardControl.Header>
+            <StackPanel Orientation="Horizontal">
+                <Slider Width="200" Minimum="20" Maximum="100" SmallChange="5" LargeChange="10" IsSnapToTickEnabled="True" TickFrequency="5"
+                        VerticalAlignment="Center" Value="{Binding TextOpacity}"/>
+                <TextBlock Width="48" Margin="10,0,0,0" Style="{StaticResource Body}" Text="{Binding TextOpacity, StringFormat={}{0:0} %}"/>
+            </StackPanel>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon Layer24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <TextBlock Style="{StaticResource Body}" Text="{Binding [Overlay.BackgroundOpacity], Source={x:Static l:Loc.Instance}}"/>
+            </ui:CardControl.Header>
+            <StackPanel Orientation="Horizontal">
+                <Slider Width="200" Minimum="0" Maximum="100" SmallChange="5" LargeChange="10" IsSnapToTickEnabled="True" TickFrequency="5"
+                        VerticalAlignment="Center" Value="{Binding BackgroundOpacity}"/>
+                <TextBlock Width="48" Margin="10,0,0,0" Style="{StaticResource Body}" Text="{Binding BackgroundOpacity, StringFormat={}{0:0} %}"/>
+            </StackPanel>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon WindowText20}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <TextBlock Style="{StaticResource Body}" Text="{Binding [Overlay.Position], Source={x:Static l:Loc.Instance}}"/>
+            </ui:CardControl.Header>
+            <ComboBox Width="220" ItemsSource="{Binding Positions}" SelectedItem="{Binding SelectedPosition}" DisplayMemberPath="Label"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon Translate24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Overlay.ShowOriginal], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Overlay.ShowOriginalHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ui:ToggleSwitch IsChecked="{Binding ShowOriginal}"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon History24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <TextBlock Style="{StaticResource Body}" Text="{Binding [Overlay.HistoryLines], Source={x:Static l:Loc.Instance}}"/>
+            </ui:CardControl.Header>
+            <ui:NumberBox Width="140" Minimum="3" Maximum="50" SmallChange="1" MaxDecimalPlaces="0"
+                          Value="{Binding HistoryLines, UpdateSourceTrigger=PropertyChanged}"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon ScanText24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Overlay.LabelSeconds], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Overlay.LabelSecondsHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ui:NumberBox Width="140" Minimum="0" Maximum="300" SmallChange="1" MaxDecimalPlaces="0"
+                          Value="{Binding LabelSeconds, UpdateSourceTrigger=PropertyChanged}"/>
+        </ui:CardControl>
+    </StackPanel>
+</Page>

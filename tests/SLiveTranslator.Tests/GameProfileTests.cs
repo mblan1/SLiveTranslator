@@ -309,4 +309,52 @@ public class GameProfileStoreTests
         Assert.Contains(store.Problems, p => p.Contains("broken.json"));
         Assert.Contains(store.Problems, p => p.Contains("same") || p.Contains("another profile"));
     }
+
+    [Fact]
+    public void A_new_profile_never_writes_over_a_file_that_could_not_be_read_or_holds_another_profile()
+    {
+        using var dir = new TempDir();
+        const string typo = "{ \"id\": \"custom\", \"keep\": [\"Roach\" }"; // a hand edit with a typo, reported at startup
+        File.WriteAllText(dir.File("custom.json"), typo);
+        File.WriteAllBytes(dir.File("skyrim.json"), TestProfiles.Witcher3Bytes); // a copy to start a variant from: it loads as witcher3
+        var store = Store(dir);
+        Assert.Contains(store.Problems, p => p.Contains("custom.json"));
+
+        Assert.Equal("custom-2", store.NewId("custom"));
+        Assert.Equal("skyrim-2", store.NewId("skyrim"));
+        Assert.Equal("gwent", store.NewId("gwent"));
+        // An import of these ids, or a profile made in code, keeps clear of the two files all the same.
+        store.Save(new GameProfile { Id = "custom", Name = "New profile" });
+        store.Save(new GameProfile { Id = "skyrim", Name = "Skyrim" });
+
+        Assert.Equal(typo, File.ReadAllText(dir.File("custom.json")));
+        Assert.Equal(TestProfiles.Witcher3Bytes, File.ReadAllBytes(dir.File("skyrim.json")));
+        Assert.Equal("custom", GameProfileStore.Parse(File.ReadAllBytes(dir.File("custom-2.json"))).Id);
+        Assert.Equal("skyrim", GameProfileStore.Parse(File.ReadAllBytes(dir.File("skyrim-2.json"))).Id);
+        Assert.Equal(["custom", "skyrim", "witcher3"], Store(dir).Profiles.Select(p => p.Id).Order());
+    }
+
+    [Fact]
+    public void A_copy_edited_apart_replaces_the_profile_with_its_id_in_its_own_file()
+    {
+        using var dir = new TempDir();
+        File.WriteAllBytes(dir.File("w3.json"), TestProfiles.Witcher3Bytes); // a profile the user named differently
+        var store = Store(dir);
+        var inUse = store.Find("witcher3")!;
+        var copy = GameProfileStore.Copy(inUse);
+
+        copy.Keep.Add("Jaskier");
+        store.Save(copy);
+
+        Assert.Same(copy, store.Find("witcher3"));
+        Assert.Equal(2, copy.Version);
+        Assert.Equal(1, inUse.Version);
+        Assert.DoesNotContain("Jaskier", inUse.Keep); // translations running meanwhile never see the edit half done
+        Assert.Contains("Jaskier", GameProfileStore.Parse(File.ReadAllBytes(dir.File("w3.json"))).Keep);
+        Assert.Single(Store(dir).Profiles, p => p.Id == "witcher3");
+
+        var older = TestProfiles.Witcher3(); // an import with an older version still goes above the one it replaces
+        store.Save(older);
+        Assert.Equal(3, store.Find("witcher3")!.Version);
+    }
 }

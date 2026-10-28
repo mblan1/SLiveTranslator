@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <PackageReference Include="Anthropic" Version="13.3.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
     <InternalsVisibleTo Include="SLiveTranslator.Tests" />
   </ItemGroup>
 

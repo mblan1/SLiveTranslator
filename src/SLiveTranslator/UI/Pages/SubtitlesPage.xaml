@@ -1,0 +1,76 @@
+<Page x:Class="SLiveTranslator.UI.Pages.SubtitlesPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:l="clr-namespace:SLiveTranslator.UI"
+      Title="{Binding [Nav.Subtitles], Source={x:Static l:Loc.Instance}}">
+    <Page.Resources>
+        <ResourceDictionary Source="PageStyles.xaml"/>
+    </Page.Resources>
+    <StackPanel Margin="24,12,24,24">
+        <TextBlock Style="{StaticResource PageTitle}" Text="{Binding [Subtitles.Title], Source={x:Static l:Loc.Instance}}"/>
+
+        <ui:CardControl Icon="{ui:SymbolIcon SelectObject24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Subtitles.Region], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding RegionText}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Subtitles.RegionHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ui:Button Content="{Binding [Subtitles.Select], Source={x:Static l:Loc.Instance}}" Command="{Binding SelectRegionCommand}"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon ArrowSync24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Subtitles.Interval], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Subtitles.IntervalHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ui:NumberBox Width="150" Minimum="100" Maximum="5000" SmallChange="50" LargeChange="500" MaxDecimalPlaces="0"
+                          Value="{Binding IntervalMs, UpdateSourceTrigger=PropertyChanged}"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon Games24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Subtitles.Pause], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Subtitles.PauseHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ui:ToggleSwitch IsChecked="{Binding PauseWhenGameUnfocused}"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon ScanText24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Subtitles.OcrMode], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Subtitles.OcrModeHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ComboBox Width="220" ItemsSource="{Binding OcrModes}" SelectedItem="{Binding SelectedOcrMode}" DisplayMemberPath="Label"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon Flash24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Subtitles.LowImpact], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Subtitles.LowImpactHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ui:ToggleSwitch IsChecked="{Binding LowImpact}"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon TextFont24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Subtitles.GapRatio], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Subtitles.GapRatioHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ui:NumberBox Width="150" Minimum="0.7" Maximum="2.5" SmallChange="0.1" LargeChange="0.5" MaxDecimalPlaces="2"
+                          Value="{Binding ParagraphGapRatio, UpdateSourceTrigger=PropertyChanged}"/>
+        </ui:CardControl>
+    </StackPanel>
+</Page>

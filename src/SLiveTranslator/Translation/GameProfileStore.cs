@@ -80,7 +80,12 @@ public sealed class GameProfileStore
         return profile is not null && profile.Fits(src, tgt) ? profile : null;
     }
 
-    /// <summary>Writes an edited or new profile; its version goes up, so its cached translations are made again.</summary>
+    /// <summary>
+    /// Writes an edited or new profile; its version goes up, so its cached translations are made again. A copy edited
+    /// apart from the profile in use (the settings page, an import) replaces the profile with its id, in that one's
+    /// file, and its version goes above that one's: translations running meanwhile never see a half-edited profile.
+    /// A profile with an id of its own gets a file of its own, never one already there (see <see cref="FreeFile"/>).
+    /// </summary>
     public void Save(GameProfile profile)
     {
         if (profile.Id.Length == 0 || profile.Id.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || profile.Id.StartsWith('.'))
@@ -88,8 +93,12 @@ public sealed class GameProfileStore
         lock (_gate)
         {
             var loaded = Load();
-            string file = loaded.Files.TryGetValue(profile, out var known) ? known : Path.Combine(_dir, profile.Id + ".json");
-            profile.Version++;
+            var replaced = loaded.Files.ContainsKey(profile)
+                ? null
+                : loaded.Profiles.FirstOrDefault(p => p.Id.Equals(profile.Id, StringComparison.OrdinalIgnoreCase));
+            string file = loaded.Files.TryGetValue(replaced ?? profile, out var known) ? known : FreeFile(loaded, profile.Id);
+            int version = profile.Version;
+            profile.Version = Math.Max(profile.Version, replaced?.Version ?? 0) + 1;
             try
             {
                 Directory.CreateDirectory(_dir);
@@ -97,14 +106,38 @@ public sealed class GameProfileStore
             }
             catch
             {
-                profile.Version--; // not saved: the cached translations still belong to it
+                profile.Version = version; // not saved: the cached translations still belong to it
                 throw;
             }
-            var files = new Dictionary<GameProfile, string>(loaded.Files, ReferenceEqualityComparer.Instance) { [profile] = file };
-            var profiles = loaded.Profiles.Contains(profile) ? loaded.Profiles : [.. loaded.Profiles, profile];
+            var files = new Dictionary<GameProfile, string>(loaded.Files, ReferenceEqualityComparer.Instance);
+            if (replaced is not null) files.Remove(replaced);
+            files[profile] = file;
+            var profiles = replaced is not null ? loaded.Profiles.Select(p => ReferenceEquals(p, replaced) ? profile : p).ToArray()
+                : loaded.Profiles.Contains(profile) ? loaded.Profiles
+                : [.. loaded.Profiles, profile];
             _loaded = loaded with { Profiles = profiles, Files = files };
         }
     }
+
+    /// <summary>"id.json", else "id-2.json" …: a file that could not be read, or one that holds a profile with another id, is the user's and is never written over.</summary>
+    string FreeFile(Loaded loaded, string id)
+    {
+        var taken = new HashSet<string>(loaded.Files.Values, StringComparer.OrdinalIgnoreCase);
+        string path = Path.Combine(_dir, id + ".json");
+        for (int n = 2; taken.Contains(path) || File.Exists(path); n++) path = Path.Combine(_dir, $"{id}-{n}.json");
+        return path;
+    }
+
+    /// <summary>An id for a new profile that no profile has and no file in the folder is named after: "custom", "custom-2" …</summary>
+    public string NewId(string stem)
+    {
+        string id = stem;
+        for (int n = 2; Find(id) is not null || File.Exists(Path.Combine(_dir, id + ".json")); n++) id = $"{stem}-{n}";
+        return id;
+    }
+
+    /// <summary>A deep copy to edit apart from the profile in use; <see cref="Save"/> then replaces that one.</summary>
+    public static GameProfile Copy(GameProfile profile) => Parse(JsonSerializer.SerializeToUtf8Bytes(profile, JsonOptions));
 
     /// <summary>
     /// Reads a profile as a text editor may have saved it: with a UTF-8 byte order mark (Notepad, Visual Studio,

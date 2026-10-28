@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Windows.Threading;
+using SLiveTranslator.Models;
 using SLiveTranslator.Services;
 using SLiveTranslator.UI.Overlay;
 using DRect = System.Drawing.Rectangle;
@@ -13,14 +14,12 @@ namespace SLiveTranslator.UI;
 /// </summary>
 public sealed class SubtitlePresenter : ISubtitleSink
 {
-    const int HistoryLines = 12;
     static readonly TimeSpan Linger = TimeSpan.FromSeconds(6);
 
     readonly Dispatcher _ui;
     readonly OverlayHost _overlay;
     readonly Func<DRect> _region;
-    readonly Func<int> _fontSize;
-    readonly Func<int> _maxLines;
+    readonly Func<OverlaySettings> _look;
     readonly Func<string> _historyHotkey;
     readonly Action<string> _onError;
     readonly Action<string> _onNotice;
@@ -29,19 +28,20 @@ public sealed class SubtitlePresenter : ISubtitleSink
     readonly DispatcherTimer _linger;
     bool _live; // the game shows a subtitle right now
 
-    public SubtitlePresenter(Dispatcher ui, OverlayHost overlay, Func<DRect> region, Func<int> fontSize, Func<int> maxLines,
-        Func<string> historyHotkey, Action<string> onError, Action<string> onNotice, Action<bool> onPaused)
+    /// <param name="look">The overlay settings in use: font size, lines, opacity, position, original text, history length.</param>
+    /// <param name="linger">How long the last lines stay after the game hides them (tests shorten it).</param>
+    public SubtitlePresenter(Dispatcher ui, OverlayHost overlay, Func<DRect> region, Func<OverlaySettings> look,
+        Func<string> historyHotkey, Action<string> onError, Action<string> onNotice, Action<bool> onPaused, TimeSpan? linger = null)
     {
         _ui = ui;
         _overlay = overlay;
         _region = region;
-        _fontSize = fontSize;
-        _maxLines = maxLines;
+        _look = look;
         _historyHotkey = historyHotkey;
         _onError = onError;
         _onNotice = onNotice;
         _onPaused = onPaused;
-        _linger = new DispatcherTimer(DispatcherPriority.Normal, ui) { Interval = Linger };
+        _linger = new DispatcherTimer(DispatcherPriority.Normal, ui) { Interval = linger ?? Linger };
         _linger.Tick += (_, _) =>
         {
             _linger.Stop();
@@ -53,7 +53,9 @@ public sealed class SubtitlePresenter : ISubtitleSink
     public bool HistoryVisible { get; private set; }
     public int Count => _board.Count;
 
-    int VisibleLines => Math.Clamp(_maxLines(), 1, 5);
+    int VisibleLines => Math.Clamp(_look().MaxLines, 1, 5);
+
+    int HistoryLines => Math.Clamp(_look().HistoryLines, 1, 100);
 
     public void Start() => _ui.Invoke(() =>
     {
@@ -88,11 +90,18 @@ public sealed class SubtitlePresenter : ISubtitleSink
 
     /// <summary>
     /// Shows the user's fix on every line with this source text. The caller stores it in the cache first
-    /// (<see cref="Translation.CachedTranslator.SetUserOverride"/>), so the line keeps it when it comes again.
+    /// (<see cref="SLiveTranslator.Translation.CachedTranslator.SetUserOverride"/>), so the line keeps it when it comes again.
     /// </summary>
     public void ApplyFix(string source, string translation) => _ui.BeginInvoke(() =>
     {
         if (_board.Fix(source, translation)) Render();
+    });
+
+    /// <summary>Draws what is on screen again, in the look the overlay settings now ask for.</summary>
+    public void Restyle() => _ui.BeginInvoke(() =>
+    {
+        if (_board.Visible(VisibleLines).Count > 0) Render();
+        else if (HistoryVisible) RenderHistory();
     });
 
     // ---- ISubtitleSink ----
@@ -141,7 +150,8 @@ public sealed class SubtitlePresenter : ISubtitleSink
 
     void Render()
     {
-        _overlay.ShowSubtitleLines(_board.Visible(VisibleLines), _region(), _fontSize());
+        var look = _look();
+        _overlay.ShowSubtitleLines(_board.Visible(VisibleLines, look.ShowOriginal), _region(), look.FontSize, SubtitleStyle.From(look));
         if (HistoryVisible) RenderHistory();
     }
 

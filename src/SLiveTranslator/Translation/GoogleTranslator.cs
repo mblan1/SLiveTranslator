@@ -31,6 +31,9 @@ public sealed class GoogleTranslator : ITranslator
 
     public string Name => "google";
 
+    /// <summary>Until when this network's block pauses Google (UTC); null while it is not paused.</summary>
+    public DateTime? BlockedUntilUtc => _blockedUntilUtc > DateTime.UtcNow ? _blockedUntilUtc : null;
+
     public async Task<IReadOnlyList<string>> TranslateAsync(IReadOnlyList<string> texts, string sourceLang, string targetLang, CancellationToken ct)
     {
         var results = new string[texts.Count];

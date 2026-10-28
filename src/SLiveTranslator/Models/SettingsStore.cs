@@ -142,6 +142,14 @@ public sealed class SettingsStore
         if (backedUp) Log.Write($"settings: stored the version 1 file as schema {CurrentSchemaVersion}; the original is {Path.GetFileName(V1BackupPath)}");
     }
 
+    /// <summary>The settings as the file holds them (key blobs and fields this version does not know included).</summary>
+    internal static JsonNode ToNode(AppSettings settings) => JsonSerializer.SerializeToNode(settings, JsonOptions)!;
+
+    internal static AppSettings FromNode(JsonNode node) => node.Deserialize<AppSettings>(JsonOptions) ?? new AppSettings();
+
+    /// <summary>A deep copy, made through the file's form, so a working copy can be edited without touching the settings in use.</summary>
+    public static AppSettings Clone(AppSettings settings) => FromNode(ToNode(settings));
+
     /// <summary>
     /// Three-way merge of what is about to be saved into the file: a value the app left as it was when the file was
     /// read keeps the file's version, so a value this version could not read (a newer enum name, an unknown hotkey
@@ -168,6 +176,42 @@ public sealed class SettingsStore
             return merged;
         }
         return JsonNode.DeepEquals(current, synced) ? file?.DeepClone() : current?.DeepClone();
+    }
+
+    /// <summary>
+    /// Three-way merge of two copies edited apart from <paramref name="ancestor"/> (the settings window's and the
+    /// app's): what only one side changed comes from that side, an item or key it removed included; where both
+    /// changed the same value, <paramref name="winner"/>'s stays. Arrays are sets, as in <see cref="Merge"/>.
+    /// </summary>
+    internal static JsonNode? MergeEdits(JsonNode? ancestor, JsonNode? winner, JsonNode? other)
+    {
+        if (JsonNode.DeepEquals(other, ancestor)) return winner?.DeepClone();
+        if (JsonNode.DeepEquals(winner, ancestor)) return other?.DeepClone();
+        if (winner is JsonObject w && other is JsonObject o)
+        {
+            var a = ancestor as JsonObject;
+            var merged = new JsonObject();
+            foreach (var (key, value) in w)
+            {
+                JsonNode? before = null;
+                bool inAncestor = a?.TryGetPropertyValue(key, out before) == true;
+                if (o.TryGetPropertyValue(key, out var otherValue)) merged[key] = MergeEdits(before, value, otherValue);
+                else if (!inAncestor || !JsonNode.DeepEquals(value, before)) merged[key] = value?.DeepClone(); // not removed by the other side, or changed here
+            }
+            foreach (var (key, value) in o)
+                if (!w.ContainsKey(key) && a?.ContainsKey(key) != true) merged[key] = value?.DeepClone(); // added by the other side
+            return merged;
+        }
+        if (winner is JsonArray wa && other is JsonArray oa)
+        {
+            var aa = ancestor as JsonArray ?? new JsonArray();
+            bool In(JsonArray array, JsonNode? item) => array.Any(n => JsonNode.DeepEquals(n, item));
+            var merged = new JsonArray(wa.Where(n => !(In(aa, n) && !In(oa, n))).Select(n => n?.DeepClone()).ToArray());
+            foreach (var item in oa)
+                if (!In(aa, item) && !In(wa, item)) merged.Add(item?.DeepClone());
+            return merged;
+        }
+        return winner?.DeepClone();
     }
 
     /// <returns>The file's text; null when there is none or it could not be read.</returns>

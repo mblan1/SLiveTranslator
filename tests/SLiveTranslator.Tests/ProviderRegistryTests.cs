@@ -131,6 +131,34 @@ public class ProviderRegistryTests
     }
 
     [Fact]
+    public async Task A_test_chain_reports_no_switch_and_leaves_the_free_services_in_use_alone()
+    {
+        var registry = Offline();
+        var engine = new FailingEngine();
+        registry.Register(new ProviderRegistration("deepl", "DeepL", TakesInstructions: false, s => null, _ => engine));
+        var switches = new List<ServiceSwitch>();
+        registry.ServiceSwitched += (_, e) => switches.Add(e);
+        var freeInUse = registry.Free("");
+        var myMemoryInUse = registry.MyMemory(""); // it remembers when its quota ran out: a test must not replace it
+        var settings = new TranslationSettings { Provider = "deepl" };
+        settings.Free.MyMemoryEmail = "typed-not-saved@example.com";
+        var request = new TranslateRequest(["Ciri, get down here!"], "en", "vi", [], TestProfiles.Witcher3());
+
+        var tested = await registry.BuildDetached(settings).Translator.TranslateAsync(request, CancellationToken.None);
+
+        Assert.Equal(["gg:Ciri, get down here!"], tested.Texts);
+        Assert.Single(engine.Sent);
+        Assert.Empty(switches); // the provider in use did not fail: no alert, no "provider down" on Home
+        Assert.Same(myMemoryInUse, registry.MyMemory(""));
+        Assert.Same(freeInUse, registry.Free(""));
+
+        settings.Provider = ProviderIds.Free;
+        settings.Free.MyMemoryEmail = " ";
+        Assert.Same(freeInUse, registry.BuildDetached(settings).Translator); // the email in use: the same services
+        Assert.Same(myMemoryInUse, registry.MyMemory(""));
+    }
+
+    [Fact]
     public async Task Behind_the_cache_the_free_services_answer_a_line_they_translated_before_while_the_provider_is_down()
     {
         using var dir = new TempDir();

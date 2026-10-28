@@ -171,4 +171,17 @@ public class SubtitleBoardTests
         Assert.Equal(["user", null, "user"], board.Records(12).Select(r => r.Provider));
         Assert.False(board.Fix("Not shown.", "x"));
     }
+
+    [Fact]
+    public void A_translated_line_carries_its_source_only_when_the_overlay_shows_the_original()
+    {
+        var board = new SubtitleBoard();
+        board.Detected(1, "Where is the griffin?", false);
+        board.Translated(1, "Con griffin ở đâu?", false, 3);
+        board.Detected(2, "Follow me.", false);
+
+        Assert.Equal([new SubtitleLineView("Con griffin ở đâu?", false, Original: "Where is the griffin?"), new SubtitleLineView("…", true)],
+            board.Visible(3, withOriginal: true));
+        Assert.Null(board.Visible(3)[0].Original);
+    }
 }

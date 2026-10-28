@@ -191,9 +191,29 @@ public sealed class ProviderRegistry
     /// The cache the chain goes behind: the free services after the selected provider answer from their own entries
     /// (<see cref="CachedTranslator.Bucket"/>). Null builds the chain without it.
     /// </param>
-    public ProviderChain Build(TranslationSettings settings, CachedTranslator? cache = null)
+    public ProviderChain Build(TranslationSettings settings, CachedTranslator? cache = null) =>
+        Build(settings, Free(settings.Free.MyMemoryEmail), cache, relay: true);
+
+    /// <summary>
+    /// The chain for settings that are not in use (the settings page's "Test translation"), built like
+    /// <see cref="Build"/> without the cache, but apart from the chain in use: its switches are not reported, since the
+    /// provider in use did not fail, and a MyMemory email that is not the one in use gets a MyMemory of its own, so
+    /// the one in use keeps its quota pause.
+    /// </summary>
+    public ProviderChain BuildDetached(TranslationSettings settings)
     {
-        var free = Free(settings.Free.MyMemoryEmail);
+        string email = settings.Free.MyMemoryEmail.Trim();
+        ITranslator? free = null;
+        lock (_gate)
+        {
+            if (_myMemory is not null && email == _myMemoryEmail) free = Free(email);
+        }
+        free ??= new ProfileTranslator(new FallbackTranslator(ProviderKeys.Free, Google, _newMyMemory(email)));
+        return Build(settings, free, cache: null, relay: false);
+    }
+
+    ProviderChain Build(TranslationSettings settings, ITranslator free, CachedTranslator? cache, bool relay)
+    {
         if (!_providers.TryGetValue(settings.Provider, out var provider)) return new ProviderChain(free, null);
 
         if (provider.Unusable(settings) is { } notice)
@@ -205,7 +225,7 @@ public sealed class ProviderRegistry
         var active = provider.Create(settings);
         if (!provider.TakesInstructions) active = new ProfileTranslator(active, placeholders: !provider.MarksKeepEntries);
         var chain = new FallbackTranslator(active.Name, active, cache?.Bucket(free) ?? free) { MembersAreProviders = true };
-        chain.ServiceSwitched += Relay;
+        if (relay) chain.ServiceSwitched += Relay;
         return new ProviderChain(chain, null);
     }
 

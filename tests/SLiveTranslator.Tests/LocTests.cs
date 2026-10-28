@@ -309,4 +309,15 @@ public class LocTests
         Assert.Equal("Subtitles on/off", HotkeyText.ActionName(HotkeyAction.ToggleSubtitles));
         Assert.Equal("In use", HotkeyText.State(HotkeyResult.InUse));
     }
+
+    [Fact]
+    public void Every_choice_of_the_main_window_has_its_text()
+    {
+        var keys = Entries(Loc.English).Select(e => e.Key).ToHashSet();
+        var needed = Enum.GetValues<OcrMode>().Select(m => "OcrMode." + m)
+            .Concat(Enum.GetValues<SubtitlePosition>().Select(p => "Position." + p))
+            .Concat(Enum.GetValues<LlmEffort>().Select(e => "Effort." + e))
+            .Concat(new[] { ModelTags.Recommended, ModelTags.Balanced, ModelTags.Fastest }.Select(t => "Model." + t));
+        Assert.Empty(needed.Except(keys));
+    }
 }

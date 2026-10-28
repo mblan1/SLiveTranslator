@@ -20,6 +20,12 @@
         <Style TargetType="ComboBox">
             <Setter Property="Margin" Value="0,4"/>
         </Style>
+        <!-- Once the main window has opened, WPF-UI's implicit styles are in the app's resources, in its theme (white
+             text when dark), while this window keeps the plain look: these empty ones keep them out. -->
+        <Style TargetType="Button"/>
+        <Style TargetType="ComboBoxItem"/>
+        <Style TargetType="ScrollViewer"/>
+        <Style TargetType="ToolTip"/>
     </Window.Resources>
     <Grid Margin="18">
         <Grid.ColumnDefinitions>

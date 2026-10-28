@@ -109,10 +109,11 @@ internal sealed class SubtitleBoard
     public void CloseWindow() => _windowStart = _entries.Count;
 
     /// <summary>The latest lines of the current conversation, oldest first.</summary>
-    public IReadOnlyList<SubtitleLineView> Visible(int lines)
+    /// <param name="withOriginal">Each translated line carries the text it was made from (the overlay shows it under the translation).</param>
+    public IReadOnlyList<SubtitleLineView> Visible(int lines, bool withOriginal = false)
     {
         int from = Math.Max(Math.Min(_windowStart, _entries.Count), _entries.Count - lines);
-        return _entries.Skip(from).Select(View).ToList();
+        return _entries.Skip(from).Select(e => View(e, withOriginal)).ToList();
     }
 
     public IReadOnlyList<HistoryLineView> History(int lines) =>
@@ -126,8 +127,8 @@ internal sealed class SubtitleBoard
     /// A failed line shows its original, dimmed and marked; a line that grew keeps its old translation meanwhile,
     /// in italics while that translation came from an unreliable reading.
     /// </summary>
-    static SubtitleLineView View(Entry e) =>
-        e.Translated is { } translated ? new SubtitleLineView(translated, false, LowConfidence: e.TranslatedLowConfidence)
+    static SubtitleLineView View(Entry e, bool withOriginal) =>
+        e.Translated is { } translated ? new SubtitleLineView(translated, false, LowConfidence: e.TranslatedLowConfidence, Original: withOriginal ? e.Original : null)
         : e.Failed ? new SubtitleLineView(e.Original + RetryMark, false, Failed: true, LowConfidence: e.LowConfidence)
         : new SubtitleLineView("…", true, LowConfidence: e.LowConfidence);
 

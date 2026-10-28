@@ -23,7 +23,7 @@ public abstract class SettingsPageViewModel(SettingsViewModel root) : Observable
     }
 
     /// <summary>The settings being edited were replaced: every value is read again.</summary>
-    public void Reload() => OnPropertyChanged(string.Empty);
+    public virtual void Reload() => OnPropertyChanged(string.Empty);
 
     protected static IReadOnlyList<Choice<T>> Choices<T>(string prefix) where T : struct, Enum =>
         Enum.GetValues<T>().Select(v => new Choice<T>(v, Loc.Instance[prefix + v])).ToList();

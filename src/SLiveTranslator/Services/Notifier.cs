@@ -171,12 +171,13 @@ public sealed class Notifier
     /// One notice of each enabled category for its seconds, a sound apart, each with its sound, ignoring mute and the
     /// repeat check: what the user's settings look and sound like.
     /// </summary>
-    public async Task SendTestAsync()
+    /// <param name="look">Settings not saved yet (the Notifications page as it is); by default the ones in use.</param>
+    public async Task SendTestAsync(NotificationSettings? look = null)
     {
         bool first = true;
         foreach (var category in Categories)
         {
-            var settings = _settings();
+            var settings = look ?? _settings();
             var options = Options(settings, category);
             if (!options.Enabled) continue;
             if (!first) await _delay(SoundGap);

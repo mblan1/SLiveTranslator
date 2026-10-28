@@ -30,7 +30,7 @@ public enum SettingsChange
     /// <summary>The log's level and size.</summary>
     Log = 1 << 8,
 
-    /// <summary>Saved, with nothing to redo (the first-run flag, Start with Windows until it is wired).</summary>
+    /// <summary>Saved, with nothing to redo (the first-run flag; Start with Windows, which the General page applies at once).</summary>
     Other = 1 << 9,
 }
 

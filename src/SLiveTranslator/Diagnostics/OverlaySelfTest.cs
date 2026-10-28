@@ -23,9 +23,9 @@ namespace SLiveTranslator.Diagnostics;
 /// <summary>
 /// --selftest: shows every overlay window with sample content, saves a screen capture and a rendering of each window,
 /// and checks that each one is hidden from screen capture, has a transparent background, and lies on the monitor.
-/// Then it opens the main window, shows each of its pages, checks that it is hidden from capture and took WPF-UI's
-/// theme, and checks the overlays again after it closed: the theme applied to it must not reach them. Last, the classic
-/// settings window, whose text must stay readable with WPF-UI's dark styles in the app's resources.
+/// Then it opens the main window, shows each of its pages and each step of the welcome wizard, checks that it is
+/// hidden from capture and took WPF-UI's theme, and checks the overlays again after it closed: the theme applied to it
+/// must not reach them.
 /// </summary>
 internal static class OverlaySelfTest
 {
@@ -69,7 +69,6 @@ internal static class OverlaySelfTest
 
         await CheckMainWindowAsync(outDir, report, failures);
         Check(overlay, area, "after the main window", null, report, failures);
-        await CheckClassicWindowAsync(outDir, report, failures);
 
         report.Add(failures.Count == 0 ? "PASS" : $"FAIL ({failures.Count})");
         report.AddRange(failures);
@@ -107,26 +106,45 @@ internal static class OverlaySelfTest
             foreach (var page in new[]
                      {
                          typeof(TranslationPage), typeof(GameProfilePage), typeof(SubtitlesPage), typeof(OverlayPage), typeof(HotkeysPage),
-                         typeof(NotificationsPage), typeof(StoragePage), typeof(GeneralPage), typeof(HomePage),
+                         typeof(NotificationsPage), typeof(StoragePage), typeof(GeneralPage), typeof(HistoryPage), typeof(HomePage),
                      })
             {
                 bool shown = main.RootNavigation.Navigate(page);
-                await Task.Delay(300);
+                await Task.Delay(500);
                 report.Add($"main window: page {page.Name} shown={shown}");
                 if (!shown) failures.Add($"the main window did not show the page {page.Name}");
                 SaveRendering(main, Path.Combine(outDir, $"selftest_main_{page.Name}.png"));
+                // A tab's content is made only when it is selected: each one is shown, so its bindings are checked too.
+                foreach (var tabs in VisualDescendants(main).OfType<TabControl>().ToList())
+                {
+                    for (int tab = 1; tab < tabs.Items.Count; tab++)
+                    {
+                        tabs.SelectedIndex = tab;
+                        await Task.Delay(300);
+                        SaveRendering(main, Path.Combine(outDir, $"selftest_main_{page.Name}_tab{tab + 1}.png"));
+                    }
+                    tabs.SelectedIndex = 0;
+                }
             }
             // Each theme switch repaints the app's MainWindow: it must land on the main window, never on an overlay.
             main.Show(Loc.Instance["Main.Saved"], "", MessageKind.Success); // the snackbar a save shows
             await Task.Delay(700);
             SaveRendering(main, Path.Combine(outDir, "selftest_main_snackbar.png"));
+            vm.Welcome.Open();
+            for (int step = 0; step < WelcomeViewModel.StepCount; step++)
+            {
+                vm.Welcome.Step = step;
+                await Task.Delay(300);
+                report.Add($"main window: welcome step {step + 1} shown={vm.Welcome.IsOpen}");
+                SaveRendering(main, Path.Combine(outDir, $"selftest_welcome_{step + 1}.png"));
+            }
             foreach (var theme in new[] { AppTheme.Dark, AppTheme.Light, AppTheme.System })
             {
                 main.ApplyTheme(theme);
                 await Task.Delay(200);
             }
             report.Add($"main window: theme after Dark, Light, System = {Wpf.Ui.Appearance.ApplicationThemeManager.GetAppTheme()}");
-            main.ApplyTheme(AppTheme.Dark); // the classic window is checked next in the theme whose text is white
+            main.ApplyTheme(AppTheme.Dark); // the overlays are checked next, after the theme that paints a window opaque dark
             await Task.Delay(200);
             vm.Discard();
             main.Close();
@@ -143,64 +161,14 @@ internal static class OverlaySelfTest
         report.AddRange(bindings.Messages.Distinct().Select(m => "  binding: " + m));
     }
 
-    /// <summary>
-    /// The classic settings window after the main window closed in the dark theme: WPF-UI's implicit styles stay in the
-    /// app's resources, white text included, and its buttons and list items must keep the plain look on its white background.
-    /// </summary>
-    static async Task CheckClassicWindowAsync(string outDir, List<string> report, List<string> failures)
+    static IEnumerable<DependencyObject> VisualDescendants(DependencyObject parent)
     {
-        var classic = new SettingsWindow(new AppSettings(), () => null, () => { }) { Topmost = false, ShowActivated = false };
-        classic.Show();
-        await Task.Delay(400);
-        SaveRendering(classic, Path.Combine(outDir, "selftest_classic.png"));
-        var backdrop = (classic.Background as SolidColorBrush)?.Color ?? Colors.White;
-        int count = 0;
-        foreach (var control in LogicalDescendants(classic).OfType<Control>().Where(c => c is Button or ComboBoxItem))
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
         {
-            count++;
-            if (Contrast(control.Foreground, control.Background, backdrop) is { } contrast && contrast < 3)
-                failures.Add($"classic window: the {control.GetType().Name} '{(control as ContentControl)?.Content}' is unreadable (contrast {contrast:0.0}:1)");
-        }
-        report.Add($"classic window: {count} buttons and list items checked");
-        if (count == 0) failures.Add("classic window: no button or list item found to check");
-        classic.Close();
-    }
-
-    static IEnumerable<DependencyObject> LogicalDescendants(DependencyObject parent)
-    {
-        foreach (var child in LogicalTreeHelper.GetChildren(parent).OfType<DependencyObject>())
-        {
+            var child = VisualTreeHelper.GetChild(parent, i);
             yield return child;
-            foreach (var below in LogicalDescendants(child)) yield return below;
+            foreach (var below in VisualDescendants(child)) yield return below;
         }
-    }
-
-    /// <summary>The WCAG contrast of the text on its background laid over <paramref name="backdrop"/>; null for brushes that are not plain colours.</summary>
-    static double? Contrast(Brush? foreground, Brush? background, Color backdrop)
-    {
-        if (foreground is not SolidColorBrush fg) return null;
-        var under = background switch
-        {
-            null => backdrop,
-            SolidColorBrush bg => Over(bg.Color, backdrop),
-            _ => (Color?)null,
-        };
-        if (under is not { } back) return null;
-        double a = Luminance(Over(fg.Color, back)), b = Luminance(back);
-        return (Math.Max(a, b) + 0.05) / (Math.Min(a, b) + 0.05);
-    }
-
-    static Color Over(Color top, Color bottom)
-    {
-        double t = top.A / 255.0;
-        byte Mix(byte x, byte y) => (byte)Math.Round(x * t + y * (1 - t));
-        return Color.FromRgb(Mix(top.R, bottom.R), Mix(top.G, bottom.G), Mix(top.B, bottom.B));
-    }
-
-    static double Luminance(Color c)
-    {
-        static double Channel(byte v) => v / 255.0 <= 0.03928 ? v / 255.0 / 12.92 : Math.Pow((v / 255.0 + 0.055) / 1.055, 2.4);
-        return 0.2126 * Channel(c.R) + 0.7152 * Channel(c.G) + 0.0722 * Channel(c.B);
     }
 
     static void SaveRendering(Window window, string path)

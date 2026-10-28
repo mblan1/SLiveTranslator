@@ -6,7 +6,12 @@
       xmlns:pages="clr-namespace:SLiveTranslator.UI.Pages"
       Title="{Binding [Nav.Translation], Source={x:Static l:Loc.Instance}}">
     <Page.Resources>
-        <ResourceDictionary Source="PageStyles.xaml"/>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="PageStyles.xaml"/>
+                <ResourceDictionary Source="ProviderCard.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
     </Page.Resources>
     <StackPanel Margin="24,12,24,24">
         <TextBlock Style="{StaticResource PageTitle}" Text="{Binding [Translation.Title], Source={x:Static l:Loc.Instance}}"/>
@@ -49,99 +54,7 @@
                                 </StackPanel>
                             </DockPanel>
                         </ui:CardExpander.Header>
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="170"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-
-                            <TextBlock Grid.Row="1" Style="{StaticResource FieldLabel}" Text="{Binding [Card.Preset], Source={x:Static l:Loc.Instance}}"
-                                       Visibility="{Binding IsCompat, Converter={StaticResource VisibleWhen}}"/>
-                            <ComboBox Grid.Row="1" Grid.Column="1" Width="260" HorizontalAlignment="Left" Margin="0,4"
-                                      ItemsSource="{Binding PresetChoices}" SelectedItem="{Binding SelectedPreset}" DisplayMemberPath="Label"
-                                      IsEnabled="{Binding IsKeyReadOnly, Converter={StaticResource Not}}"
-                                      Visibility="{Binding IsCompat, Converter={StaticResource VisibleWhen}}"/>
-
-                            <TextBlock Grid.Row="2" Style="{StaticResource FieldLabel}" Text="{Binding [Card.BaseUrl], Source={x:Static l:Loc.Instance}}"
-                                       Visibility="{Binding ShowBaseUrl, Converter={StaticResource VisibleWhen}}"/>
-                            <ui:TextBox Grid.Row="2" Grid.Column="1" Margin="0,4" MaxWidth="520" HorizontalAlignment="Stretch"
-                                        PlaceholderText="http://localhost:11434/v1"
-                                        Text="{Binding BaseUrl, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="{Binding IsKeyReadOnly}"
-                                        Visibility="{Binding ShowBaseUrl, Converter={StaticResource VisibleWhen}}"/>
-
-                            <TextBlock Grid.Row="3" Style="{StaticResource FieldLabel}" Text="{Binding [Card.Region], Source={x:Static l:Loc.Instance}}"
-                                       Visibility="{Binding ShowRegion, Converter={StaticResource VisibleWhen}}"/>
-                            <ui:TextBox Grid.Row="3" Grid.Column="1" Margin="0,4" Width="260" HorizontalAlignment="Left" PlaceholderText="southeastasia"
-                                        Text="{Binding Region, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="{Binding IsKeyReadOnly}"
-                                        Visibility="{Binding ShowRegion, Converter={StaticResource VisibleWhen}}"/>
-
-                            <TextBlock Grid.Row="4" Style="{StaticResource FieldLabel}" Text="{Binding [Card.ProjectId], Source={x:Static l:Loc.Instance}}"
-                                       Visibility="{Binding ShowProjectId, Converter={StaticResource VisibleWhen}}"/>
-                            <ui:TextBox Grid.Row="4" Grid.Column="1" Margin="0,4" Width="260" HorizontalAlignment="Left"
-                                        Text="{Binding ProjectId, UpdateSourceTrigger=PropertyChanged}" IsReadOnly="{Binding IsKeyReadOnly}"
-                                        Visibility="{Binding ShowProjectId, Converter={StaticResource VisibleWhen}}"/>
-
-                            <TextBlock Grid.Row="5" Style="{StaticResource FieldLabel}" Text="{Binding KeyLabel}"/>
-                            <DockPanel Grid.Row="5" Grid.Column="1" Margin="0,4" MaxWidth="620" HorizontalAlignment="Stretch">
-                                <ui:ProgressRing DockPanel.Dock="Right" Width="22" Height="22" Margin="10,0,0,0" IsIndeterminate="True"
-                                                 Visibility="{Binding IsChecking, Converter={StaticResource VisibleWhen}}"/>
-                                <ui:Button DockPanel.Dock="Right" Margin="8,0,0,0" Icon="{ui:SymbolIcon Delete24}" Command="{Binding RemoveKeyCommand}"
-                                           Content="{Binding [Card.RemoveKey], Source={x:Static l:Loc.Instance}}"
-                                           Visibility="{Binding CanRemoveKey, Converter={StaticResource VisibleWhen}}"/>
-                                <ui:Button DockPanel.Dock="Right" Margin="8,0,0,0" Icon="{ui:SymbolIcon Key24}" Command="{Binding CheckCommand}"
-                                           Content="{Binding [Card.Check], Source={x:Static l:Loc.Instance}}"/>
-                                <ui:PasswordBox Password="{Binding KeyText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                                PlaceholderText="{Binding KeyPlaceholder}" IsReadOnly="{Binding IsKeyReadOnly}"/>
-                            </DockPanel>
-
-                            <TextBlock Grid.Row="6" Style="{StaticResource FieldLabel}" Text="{Binding ModelLabel}"/>
-                            <StackPanel Grid.Row="6" Grid.Column="1" Margin="0,4">
-                                <ComboBox Width="420" HorizontalAlignment="Left" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}"
-                                          DisplayMemberPath="Text" IsEnabled="{Binding IsModelEnabled}"/>
-                                <TextBlock Style="{StaticResource Hint}" Text="{Binding ModelHint}"
-                                           Visibility="{Binding ModelHint, Converter={StaticResource VisibleWhen}}"/>
-                                <TextBlock Style="{StaticResource Caution}" Text="{Binding SavedModelWarning}"
-                                           Visibility="{Binding SavedModelWarning, Converter={StaticResource VisibleWhen}}"/>
-                                <TextBlock Style="{StaticResource Hint}" Text="{Binding CostHint}"
-                                           Visibility="{Binding CostHint, Converter={StaticResource VisibleWhen}}"/>
-                            </StackPanel>
-
-                            <StackPanel Grid.Row="7" Grid.ColumnSpan="2" Margin="0,8,0,0">
-                                <ui:InfoBar IsClosable="False" IsOpen="{Binding InfoOpen}" Title="{Binding InfoTitle}" Message="{Binding InfoMessage}"
-                                            Severity="{Binding InfoKind, Converter={StaticResource SeverityOf}}"/>
-                                <TextBlock Style="{StaticResource Caution}" Text="{Binding OfflineNote}"
-                                           Visibility="{Binding OfflineNote, Converter={StaticResource VisibleWhen}}"/>
-                                <StackPanel Margin="0,6,0,0" Visibility="{Binding ShowUsage, Converter={StaticResource VisibleWhen}}">
-                                    <TextBlock Style="{StaticResource Body}" Text="{Binding UsageText}"/>
-                                    <ProgressBar Height="6" Margin="0,4,0,0" Maximum="1" Value="{Binding UsageFraction, Mode=OneWay}"/>
-                                </StackPanel>
-                            </StackPanel>
-
-                            <TextBlock Grid.Row="8" Style="{StaticResource FieldLabel}" Margin="0,8,12,0"
-                                       Text="{Binding [Card.Effort], Source={x:Static l:Loc.Instance}}"
-                                       Visibility="{Binding IsClaude, Converter={StaticResource VisibleWhen}}"/>
-                            <StackPanel Grid.Row="8" Grid.Column="1" Margin="0,8,0,0" Visibility="{Binding IsClaude, Converter={StaticResource VisibleWhen}}">
-                                <ComboBox Width="200" HorizontalAlignment="Left" ItemsSource="{Binding EffortChoices}" SelectedItem="{Binding SelectedEffort}"
-                                          DisplayMemberPath="Label"/>
-                                <TextBlock Style="{StaticResource Hint}" Text="{Binding [Card.EffortHint], Source={x:Static l:Loc.Instance}}"/>
-                            </StackPanel>
-
-                            <TextBlock Grid.Row="9" Grid.ColumnSpan="2" Margin="0,8,0,0" Style="{StaticResource Hint}"
-                                       Text="{Binding [Card.GeminiFreeTier], Source={x:Static l:Loc.Instance}}"
-                                       Visibility="{Binding IsGemini, Converter={StaticResource VisibleWhen}}"/>
-                        </Grid>
+                        <ContentControl Content="{Binding}" ContentTemplate="{StaticResource ProviderCardBody}" Focusable="False"/>
                     </ui:CardExpander>
                 </DataTemplate>
             </ItemsControl.ItemTemplate>

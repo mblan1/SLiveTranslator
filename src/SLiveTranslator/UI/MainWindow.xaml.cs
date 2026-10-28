@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
@@ -176,6 +177,20 @@ public partial class MainWindow : FluentWindow, IUserPrompts
         return await dialog.ShowAsync(CancellationToken.None) == ContentDialogResult.Primary;
     }
 
+    public async Task<DialogAnswer> AskAsync(string title, string text, string primary, string secondary, string cancel)
+    {
+        var dialog = new ContentDialog(DialogHost)
+        {
+            Title = title, Content = text, PrimaryButtonText = primary, SecondaryButtonText = secondary, CloseButtonText = cancel,
+        };
+        return await dialog.ShowAsync(CancellationToken.None) switch
+        {
+            ContentDialogResult.Primary => DialogAnswer.Primary,
+            ContentDialogResult.Secondary => DialogAnswer.Secondary,
+            _ => DialogAnswer.Cancel,
+        };
+    }
+
     public string? PickOpenFile(string filter)
     {
         var dialog = new Microsoft.Win32.OpenFileDialog { Filter = filter };
@@ -186,6 +201,26 @@ public partial class MainWindow : FluentWindow, IUserPrompts
     {
         var dialog = new Microsoft.Win32.SaveFileDialog { Filter = filter, FileName = fileName };
         return dialog.ShowDialog(this) == true ? dialog.FileName : null;
+    }
+
+    public string? PickFolder(string? start)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog { InitialDirectory = start ?? "" };
+        return dialog.ShowDialog(this) == true ? dialog.FolderName : null;
+    }
+
+    public bool CopyText(string text)
+    {
+        try
+        {
+            Clipboard.SetText(text);
+            return true;
+        }
+        catch (COMException ex)
+        {
+            Log.Warn("clipboard: " + ex.Message); // another program holds it
+            return false;
+        }
     }
 
     /// <summary>
@@ -201,10 +236,15 @@ public partial class MainWindow : FluentWindow, IUserPrompts
             if (_pages.TryGetValue(pageType, out var page)) return page;
             page = (FrameworkElement)Activator.CreateInstance(pageType)!;
             page.DataContext = pageType == typeof(HomePage) ? vm.Home
+                : pageType == typeof(HistoryPage) ? vm.History
                 : pageType == typeof(TranslationPage) ? vm.Translation
                 : pageType == typeof(GameProfilePage) ? vm.Profiles
                 : pageType == typeof(SubtitlesPage) ? vm.Subtitles
                 : pageType == typeof(OverlayPage) ? vm.Overlay
+                : pageType == typeof(HotkeysPage) ? vm.Hotkeys
+                : pageType == typeof(NotificationsPage) ? vm.Notifications
+                : pageType == typeof(StoragePage) ? vm.Storage
+                : pageType == typeof(GeneralPage) ? vm.General
                 : vm;
             _pages[pageType] = page;
             return page;

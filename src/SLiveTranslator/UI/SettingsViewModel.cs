@@ -41,8 +41,19 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
         Profiles = new ProfileEditorViewModel(this, host.Profiles);
         Subtitles = new SubtitlesViewModel(this, host);
         Overlay = new OverlayViewModel(this, host);
-        SaveCommand = new RelayCommand(() => Save(), () => HasChanges);
+        Hotkeys = new HotkeysViewModel(this, host);
+        Notifications = new NotificationsViewModel(this, host);
+        Storage = new StorageViewModel(this, host);
+        General = new GeneralViewModel(this, host);
+        History = new HistoryViewModel(this, host);
+        Welcome = new WelcomeViewModel(this, host);
+        // Not while the data folder is copied: a profile saved meanwhile would stay behind in the old folder.
+        SaveCommand = new RelayCommand(() => Save(), () => HasChanges && !Storage.Folder.IsBusy);
         DiscardCommand = new RelayCommand(Discard, () => HasChanges);
+        Storage.Folder.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(DataFolderViewModel.IsBusy)) SaveCommand.NotifyCanExecuteChanged();
+        };
         host.SettingsChanged += OnSettingsChanged;
         host.StateChanged += OnStateChanged;
         _language.PropertyChanged += OnLanguageChanged;
@@ -60,6 +71,14 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
     public ProfileEditorViewModel Profiles { get; }
     public SubtitlesViewModel Subtitles { get; }
     public OverlayViewModel Overlay { get; }
+    public HotkeysViewModel Hotkeys { get; }
+    public NotificationsViewModel Notifications { get; }
+    public StorageViewModel Storage { get; }
+    public GeneralViewModel General { get; }
+    public HistoryViewModel History { get; }
+
+    /// <summary>The first-run wizard over the window (see <see cref="WelcomeViewModel.Open"/>).</summary>
+    public WelcomeViewModel Welcome { get; }
 
     public RelayCommand SaveCommand { get; }
     public RelayCommand DiscardCommand { get; }
@@ -101,6 +120,11 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
     /// <summary>Stores the edits and has the app apply them; false when they could not be stored (the user was told).</summary>
     public bool Save()
     {
+        if (Storage.Folder.IsBusy)
+        {
+            Prompts.Show(Loc.Instance["Storage.Folder"], Loc.Instance["Storage.BusySave"], MessageKind.Warning);
+            return false;
+        }
         if (!Profiles.Save()) return false;
         var merged = Merged();
         var changes = SettingsDiff.Between(_host.Current, merged);
@@ -160,6 +184,12 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
         Profiles.Reload();
         Subtitles.Relocalize();
         Overlay.Relocalize();
+        Hotkeys.Relocalize();
+        Notifications.Relocalize();
+        Storage.Relocalize();
+        General.Relocalize();
+        History.Relocalize();
+        Welcome.Relocalize();
         Home.Refresh();
     }
 
@@ -178,6 +208,10 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
         Profiles.Reload();
         Subtitles.Reload();
         Overlay.Reload();
+        Hotkeys.Reload();
+        Notifications.Reload();
+        Storage.Reload();
+        General.Reload();
     }
 
     public void Dispose()
@@ -186,5 +220,9 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
         _host.StateChanged -= OnStateChanged;
         _language.PropertyChanged -= OnLanguageChanged;
         Translation.Cancel();
+        Storage.Folder.Cancel();
+        Hotkeys.EndRecording();
+        Welcome.WindowClosed();
+        Prompts = NoPrompts.Instance; // what finishes after the window closed has nobody to tell
     }
 }

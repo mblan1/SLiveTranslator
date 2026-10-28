@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -20,6 +21,7 @@ using SLiveTranslator.Translation;
 using SLiveTranslator.Translation.Providers;
 using SLiveTranslator.UI;
 using SLiveTranslator.UI.Overlay;
+using SLiveTranslator.UI.Pages;
 using Drawing = System.Drawing;
 using DRect = System.Drawing.Rectangle;
 using Forms = System.Windows.Forms;
@@ -34,20 +36,24 @@ public partial class App : Application, ISettingsHost
     /// <summary>How long the minimized main window gets to hand the foreground to the window behind it.</summary>
     static readonly TimeSpan MainWindowAsideTime = TimeSpan.FromMilliseconds(300);
 
+    const string InstanceMutexName = @"Local\SLiveTranslator.Instance";
+
     readonly SettingsStore _store = new(DataPaths.Current.SettingsFile);
     readonly DailyCharCounter _myMemoryUsage = new(DataPaths.Current.MyMemoryUsageFile);
     readonly ProviderRegistry _providers;
     readonly GameProfileStore _profiles = new(DataPaths.Current.ProfilesDir);
     readonly Notifier _notifier;
     readonly AlertRules _alerts;
-    readonly List<(Forms.ToolStripItem Item, string Key)> _trayTexts = new();
+    readonly StartupRegistration _startup = new(new RunKey(), Environment.ProcessPath);
+    readonly DataFolderMover _dataFolders = new(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), Path.GetDirectoryName(Environment.ProcessPath));
     AppSettings _settings = new();
     OverlayHost? _overlay;
     SubtitlePresenter? _presenter;
     Forms.NotifyIcon? _tray;
-    Drawing.Icon? _iconIdle, _iconLive;
-    Forms.ToolStripMenuItem? _subtitleMenu, _historyMenu;
+    Forms.ContextMenuStrip? _trayMenu;
+    TrayIcon? _trayIcons;
     HotkeyManager? _hotkeys;
+    bool _hotkeyTrial;
     IOcrEngine? _ocr;
     CachedTranslator? _translator;
     SubtitleWatcher? _subtitles;
@@ -86,16 +92,18 @@ public partial class App : Application, ISettingsHost
         Log.MaxBytes = Math.Max(64, _settings.Storage.LogMaxKB) * 1024L;
         var problems = SettingsProblems();
 
-        if (e.Args.Length > 0 && e.Args[0].StartsWith("--", StringComparison.Ordinal))
+        // "--startup" (Start with Windows) is taken out before the "--" CLI branch, which would refuse it.
+        var start = StartupArgs.Parse(e.Args);
+        if (start.Cli is { } cli)
         {
             Native.AttachConsole(Native.ATTACH_PARENT_PROCESS);
             foreach (var problem in problems) Console.Error.WriteLine(problem);
-            _ = RunCliAsync(e.Args);
+            _ = RunCliAsync(cli);
             return;
         }
 
         // A second copy cannot get the hotkeys and only causes confusion.
-        _singleInstance = new Mutex(true, @"Local\SLiveTranslator.Instance", out bool firstInstance);
+        _singleInstance = new Mutex(true, InstanceMutexName, out bool firstInstance);
         if (!firstInstance)
         {
             MessageBox.Show(Loc.Instance["App.AlreadyRunning"], "SLiveTranslator", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -129,15 +137,16 @@ public partial class App : Application, ISettingsHost
         CreateTray();
         Loc.Instance.PropertyChanged += (_, args) =>
         {
-            if (args.PropertyName == Binding.IndexerName) LocalizeTray();
+            if (args.PropertyName == Binding.IndexerName) RebuildTray();
         };
         if (RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
 
         // Shown before the first-run window, so a reset to defaults is explained before the user saves over it.
         ShowProblems(problems);
+        if (start.Quiet) return; // started with Windows: in the tray, without the "running" notices
         if (!_settings.General.FirstRunDone)
         {
-            ShowMainWindow();
+            ShowMainWindow(welcome: true);
             return;
         }
         string keys = Loc.F("Notice.Keys", Hotkey(HotkeyAction.ToggleSubtitles), Hotkey(HotkeyAction.TranslateScreen), Hotkey(HotkeyAction.History));
@@ -265,47 +274,105 @@ public partial class App : Application, ISettingsHost
 
     void CreateTray()
     {
-        _iconIdle = TrayIcon.Create(TrayIcon.Idle);
-        _iconLive = TrayIcon.Create(TrayIcon.Live);
-
-        var menu = new Forms.ContextMenuStrip();
-        Forms.ToolStripMenuItem Item(string key, Action onClick)
-        {
-            var item = new Forms.ToolStripMenuItem(Loc.Instance[key], null, (_, _) => onClick());
-            _trayTexts.Add((item, key));
-            menu.Items.Add(item);
-            return item;
-        }
-        Item("Tray.TranslateScreen", TranslateScreen);
-        _subtitleMenu = Item("Tray.Subtitles", ToggleSubtitles);
-        _historyMenu = Item("Tray.History", ToggleHistory);
-        Item("Tray.SelectRegion", () => SelectRegion());
-        Item("Tray.Clear", ClearOverlay);
-        menu.Items.Add(new Forms.ToolStripSeparator());
-        Item("Tray.Settings", ShowMainWindow);
-        Item("Tray.SettingsClassic", ShowClassicSettings);
-        Item("Tray.OpenDataFolder", () =>
-        {
-            Directory.CreateDirectory(DataPaths.Current.Root);
-            Process.Start("explorer.exe", DataPaths.Current.Root);
-        });
-        Item("Tray.Exit", ExitApp);
-
+        _trayIcons = TrayIcon.Load();
+        _trayMenu = new Forms.ContextMenuStrip();
+        _trayMenu.Opening += (_, _) => RebuildTray(); // the state of the moment: subtitles, provider, mute, hotkeys
+        RebuildTray();
         _tray = new Forms.NotifyIcon
         {
-            Icon = _iconIdle,
+            Icon = _trayIcons.Idle,
             Text = Loc.Instance["Tray.Tooltip"],
             Visible = true,
-            ContextMenuStrip = menu,
+            ContextMenuStrip = _trayMenu,
         };
         _tray.DoubleClick += (_, _) => ShowMainWindow();
     }
 
-    /// <summary>The tray in the language just chosen.</summary>
-    void LocalizeTray()
+    /// <summary>
+    /// The tray menu for the app's state and language now (see <see cref="TrayMenu"/>). Made again when it opens and
+    /// when the language changes, never from one of its own items: an item must not be thrown away while it is clicked.
+    /// </summary>
+    void RebuildTray()
     {
-        foreach (var (item, key) in _trayTexts) item.Text = Loc.Instance[key];
-        SetLive(_subtitles?.IsRunning == true);
+        if (_trayMenu is null) return;
+        var items = TrayMenu.Build(new TrayState(HomeViewModel.ProviderLineOf(_settings.Translation, UiProviders()), _subtitles?.IsRunning == true,
+            _presenter?.HistoryVisible == true, _settings.Notifications.Muted, _settings.Hotkeys, TrayProviders(), _settings.Translation.Provider));
+        foreach (var old in _trayMenu.Items.Cast<Forms.ToolStripItem>().ToList()) old.Dispose();
+        _trayMenu.Items.Clear();
+        foreach (var item in items) _trayMenu.Items.Add(MenuItem(item));
+        if (_tray is not null) _tray.Text = Loc.Instance[_subtitles?.IsRunning == true ? "Tray.TooltipLive" : "Tray.Tooltip"];
+    }
+
+    Forms.ToolStripItem MenuItem(TrayItem item)
+    {
+        if (item.Command == TrayCommand.Separator) return new Forms.ToolStripSeparator();
+        var menu = new Forms.ToolStripMenuItem(item.Text) { Checked = item.Checked, Enabled = item.Enabled, ShortcutKeyDisplayString = item.Gesture };
+        if (item.Items is { } children)
+            foreach (var child in children) menu.DropDownItems.Add(MenuItem(child));
+        else
+            menu.Click += (_, _) => OnTrayCommand(item);
+        return menu;
+    }
+
+    void OnTrayCommand(TrayItem item)
+    {
+        switch (item.Command)
+        {
+            case TrayCommand.Subtitles: ToggleSubtitles(); break;
+            case TrayCommand.TranslateScreen: TranslateScreen(); break;
+            case TrayCommand.History: ToggleHistory(); break;
+            case TrayCommand.SelectRegion: SelectRegion(); break;
+            case TrayCommand.Clear: ClearOverlay(); break;
+            case TrayCommand.Provider: PickProvider(item.Value!); break;
+            case TrayCommand.Mute: ToggleMute(); break;
+            case TrayCommand.Open: ShowMainWindow(); break;
+            case TrayCommand.OpenDataFolder: OpenFolder(DataPaths.Current.Root); break;
+            case TrayCommand.Exit: ExitApp(); break;
+        }
+    }
+
+    IReadOnlyList<ITranslationProvider> UiProviders() => _providers.Providers.Select(p => p.Provider).OfType<ITranslationProvider>().ToList();
+
+    /// <summary>The tray's providers: the free services, each one the settings can run, and the selected one even when it cannot.</summary>
+    IReadOnlyList<Choice<string>> TrayProviders() =>
+        new[] { new Choice<string>(ProviderIds.Free, Loc.Instance["Translation.FreeProvider"]) }
+            .Concat(_providers.Providers
+                .Where(p => p.Unusable(_settings.Translation) is null || p.Id.Equals(_settings.Translation.Provider, StringComparison.OrdinalIgnoreCase))
+                .Select(p => new Choice<string>(p.Id, p.DisplayName)))
+            .ToList();
+
+    /// <summary>A provider picked in the tray: saved, and the chain is built again.</summary>
+    void PickProvider(string id)
+    {
+        if (id.Equals(_settings.Translation.Provider, StringComparison.OrdinalIgnoreCase)) return;
+        _settings.Translation.Provider = id;
+        TrySaveSettings();
+        var problems = ApplyProviders();
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
+        if (problems.Count > 0) ShowProblems(problems);
+        else _notifier.Feedback(NoticeCategory.Status, Loc.F("Notice.ProviderPicked", HomeViewModel.ProviderLineOf(_settings.Translation, UiProviders())),
+            Forms.Screen.PrimaryScreen?.Bounds);
+    }
+
+    void ToggleMute()
+    {
+        _notifier.Muted = !_notifier.Muted;
+        TrySaveSettings();
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    void OpenFolder(string path)
+    {
+        try
+        {
+            Directory.CreateDirectory(path);
+            Process.Start("explorer.exe", $"\"{path}\"");
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or Win32Exception)
+        {
+            Log.Warn($"open folder {path}: {ex.Message}");
+            _notifier.Feedback(NoticeCategory.Error, Loc.F("Notice.FolderNotOpened", path, ex.Message));
+        }
     }
 
     /// <returns>A problem to show the user, or null when every enabled hotkey is registered.</returns>
@@ -314,16 +381,26 @@ public partial class App : Application, ISettingsHost
         _hotkeys ??= new HotkeyManager();
         var results = _hotkeys.RegisterAll(_settings.Hotkeys, new Dictionary<HotkeyAction, Action>
         {
-            [HotkeyAction.TranslateScreen] = TranslateScreen,
-            [HotkeyAction.ToggleSubtitles] = ToggleSubtitles,
-            [HotkeyAction.SelectRegion] = () => SelectRegion(),
-            [HotkeyAction.Clear] = ClearOverlay,
-            [HotkeyAction.History] = ToggleHistory,
+            [HotkeyAction.TranslateScreen] = OnHotkey(HotkeyAction.TranslateScreen, TranslateScreen),
+            [HotkeyAction.ToggleSubtitles] = OnHotkey(HotkeyAction.ToggleSubtitles, ToggleSubtitles),
+            [HotkeyAction.SelectRegion] = OnHotkey(HotkeyAction.SelectRegion, () => SelectRegion()),
+            [HotkeyAction.Clear] = OnHotkey(HotkeyAction.Clear, ClearOverlay),
+            [HotkeyAction.History] = OnHotkey(HotkeyAction.History, ToggleHistory),
         });
         if (HotkeyText.Problems(results, _settings.Hotkeys) is not { } problem) return null;
         Log.Warn("hotkeys: " + string.Join(", ", results.Select(r => $"{r.Key}={_settings.Hotkeys[r.Key]}:{r.Value}")));
         return problem;
     }
+
+    /// <summary>
+    /// A hotkey press is told to the main window (the wizard's try-out), and done unless the try-out is on in the window
+    /// the user is looking at: from the game (the window behind it or minimized) every hotkey works as always.
+    /// </summary>
+    Action OnHotkey(HotkeyAction action, Action run) => () =>
+    {
+        HotkeyPressed?.Invoke(this, action);
+        if (!(_hotkeyTrial && _mainWindow is { IsActive: true })) run();
+    };
 
     async void TranslateScreen()
     {
@@ -409,7 +486,8 @@ public partial class App : Application, ISettingsHost
         if (_settings.Subtitles.Region is null && SelectRegion() is null) return;
 
         var region = _settings.Subtitles.Region!.ToRectangle();
-        _presenter!.Start();
+        _presenter!.Languages = Langs();
+        _presenter.Start();
         _subtitles.Start(region, keepGame: restart);
         ShowLiveBadge(paused: false);
         SetLive(true);
@@ -436,9 +514,8 @@ public partial class App : Application, ISettingsHost
 
     void SetLive(bool on)
     {
-        if (_subtitleMenu is not null) _subtitleMenu.Checked = on;
         if (_tray is null) return;
-        _tray.Icon = on ? _iconLive : _iconIdle;
+        _tray.Icon = on ? _trayIcons!.Live : _trayIcons!.Idle;
         _tray.Text = Loc.Instance[on ? "Tray.TooltipLive" : "Tray.Tooltip"];
         StateChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -455,8 +532,7 @@ public partial class App : Application, ISettingsHost
     void ToggleHistory()
     {
         if (_presenter is null) return;
-        bool visible = _presenter.ToggleHistory();
-        if (_historyMenu is not null) _historyMenu.Checked = visible;
+        _presenter.ToggleHistory();
     }
 
     DRect? SelectRegion()
@@ -498,11 +574,11 @@ public partial class App : Application, ISettingsHost
         bool wasRunning = _subtitles?.IsRunning == true;
         StopSubtitles();
         _presenter?.HideHistory();
-        if (_historyMenu is not null) _historyMenu.Checked = false;
         _notifier.Feedback(NoticeCategory.Status, Loc.Instance[wasRunning ? "Notice.ClearedSubtitlesOff" : "Notice.Cleared"], GameArea(), StatusKind.Off);
     }
 
-    void ShowMainWindow()
+    /// <param name="welcome">Opens the first-run wizard over it.</param>
+    void ShowMainWindow(bool welcome = false)
     {
         if (_mainWindow is { } open)
         {
@@ -510,10 +586,13 @@ public partial class App : Application, ISettingsHost
             open.Activate();
             return;
         }
-        var window = _mainWindow = OpenMainWindow();
+        var window = _mainWindow = OpenMainWindow(welcome);
         window.Closed += (_, _) =>
         {
             _mainWindow = null;
+            // The window gave them back already; whatever happened, the hotkeys must work in the game.
+            if (_hotkeys?.Suspended == true) _hotkeys.Resume();
+            _hotkeyTrial = false;
             if (_settings.General.FirstRunDone) return;
             _settings.General.FirstRunDone = true; // the first run showed the window; the next run starts in the tray
             TrySaveSettings();
@@ -522,7 +601,12 @@ public partial class App : Application, ISettingsHost
 
     /// <summary>Kept out of <see cref="ShowMainWindow"/>: WPF-UI and the view models load only when this runs.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    Window OpenMainWindow() => UI.MainWindow.Open(new SettingsViewModel(this), _settings.General.Theme);
+    Window OpenMainWindow(bool welcome)
+    {
+        var vm = new SettingsViewModel(this);
+        if (welcome) vm.Welcome.Open();
+        return UI.MainWindow.Open(vm, _settings.General.Theme);
+    }
 
     /// <summary>Exit from the tray: unsaved edits in the main window are dropped without asking (WPF closes it on shutdown).</summary>
     void ExitApp()
@@ -536,29 +620,6 @@ public partial class App : Application, ISettingsHost
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     static void ApplyTheme(Window window, AppTheme theme) => ((UI.MainWindow)window).ApplyTheme(theme);
-
-    /// <summary>The settings window of before the main window, kept reachable until the main window has every page.</summary>
-    void ShowClassicSettings()
-    {
-        if (Windows.OfType<SettingsWindow>().FirstOrDefault() is { } open)
-        {
-            open.Activate();
-            return;
-        }
-        var dialog = new SettingsWindow(_settings, SelectRegion, () => _store.Save(_settings));
-        if (dialog.ShowDialog() != true) return;
-
-        Loc.Instance.SetLanguage(_settings.Ui.Language);
-        bool restart = _subtitles?.IsRunning == true;
-        StopSubtitles();
-        var problems = BuildServices();
-        if (RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
-        if (restart) StartSubtitles(restart: true);
-        _presenter?.Restyle();
-        SettingsChanged?.Invoke(this, EventArgs.Empty);
-        if (problems.Count > 0) ShowProblems(problems);
-        else if (!restart) _notifier.Feedback(NoticeCategory.Status, Loc.Instance["Notice.SettingsSaved"], Forms.Screen.PrimaryScreen?.Bounds);
-    }
 
     /// <summary>
     /// An error that arose by itself (a subtitle line, an unexpected failure), on the in-game overlay: Windows suppresses
@@ -605,6 +666,7 @@ public partial class App : Application, ISettingsHost
         if (redo.RebuildProviders) problems.AddRange(ApplyProviders());
         if (redo.RegisterHotkeys && RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
         if (redo.Restyle) _presenter?.Restyle();
+        if (changes.HasFlag(SettingsChange.Notifications) && !_settings.Notifications.LiveBadge) _notifier.HideLiveBadge();
         if (redo.Theme && _mainWindow is not null) ApplyTheme(_mainWindow, _settings.General.Theme);
         if (redo.RestartSubtitles) StartSubtitles(restart: true);
         Log.Write($"settings: saved ({changes})");
@@ -694,6 +756,116 @@ public partial class App : Application, ISettingsHost
         new(Loc.Instance["Overlay.Sample3"], false, Original: "Roach is tired, and so am I."),
     ];
 
+    // ---- hotkeys (the Hotkeys page and the wizard) ----
+
+    public event EventHandler<HotkeyAction>? HotkeyPressed;
+
+    void ISettingsHost.SuspendHotkeys() => _hotkeys?.Suspend();
+
+    void ISettingsHost.ResumeHotkeys()
+    {
+        if (_hotkeys?.Suspended == true) _hotkeys.Resume();
+    }
+
+    HotkeyResult ISettingsHost.ProbeHotkey(string gesture, HotkeyAction action) =>
+        _hotkeys?.Probe(gesture, action) ?? HotkeyManager.Validate(gesture).Result;
+
+    bool ISettingsHost.HotkeyTrial
+    {
+        get => _hotkeyTrial;
+        set => _hotkeyTrial = value;
+    }
+
+    Task ISettingsHost.SendTestNotices(NotificationSettings look) => _notifier.SendTestAsync(look);
+
+    // ---- the data folder ----
+
+    DataPaths ISettingsHost.DataPaths => DataPaths.Current;
+    DataFolderMover ISettingsHost.DataFolders => _dataFolders;
+    CachedTranslator? ISettingsHost.Cache => _providers.Cache;
+
+    void ISettingsHost.FlushData()
+    {
+        TrySaveSettings();
+        _providers.Flush();
+    }
+
+    /// <summary>Points every file of the app at the copied folder; the log follows <see cref="DataPaths.Current"/> by itself.</summary>
+    void ISettingsHost.UseDataFolder(DataPaths paths)
+    {
+        _store.Relocate(paths.SettingsFile);
+        _providers.Cache?.Relocate(paths.CacheFile);
+        _myMemoryUsage.Relocate(paths.MyMemoryUsageFile);
+        _profiles.Relocate(paths.ProfilesDir);
+        DataPaths.Use(paths);
+        Log.Write($"data folder: now {paths.Root}{(paths.IsPortable ? " (portable)" : "")}");
+        TrySaveSettings();
+        _providers.Flush();
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>The new copy needs the hotkeys and the single-instance mutex, so this one lets go of them before starting it.</summary>
+    void ISettingsHost.Restart()
+    {
+        _hotkeys?.Dispose();
+        _hotkeys = null;
+        _singleInstance?.ReleaseMutex();
+        _singleInstance?.Dispose();
+        _singleInstance = null;
+        try
+        {
+            Process.Start(new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false });
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
+        {
+            Log.Error("restart: " + ex.Message);
+            _singleInstance = new Mutex(true, InstanceMutexName, out _);
+            RegisterHotkeys();
+            _notifier.Feedback(NoticeCategory.Error, Loc.F("Notice.RestartFailed", ex.Message));
+            return;
+        }
+        ExitApp();
+    }
+
+    void ISettingsHost.OpenFolder(string path) => OpenFolder(path);
+
+    // ---- General & About ----
+
+    StartupRegistration ISettingsHost.Startup => _startup;
+
+    void ISettingsHost.SetStartWithWindows(bool on)
+    {
+        _startup.SetEnabled(on);
+        Log.Write("startup: " + (on ? "starts with Windows" : "no longer starts with Windows"));
+        _settings.General.StartWithWindows = on;
+        TrySaveSettings();
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    IReadOnlyList<string> ISettingsHost.OcrLanguages
+    {
+        get
+        {
+            try
+            {
+                return WindowsOcrEngine.AvailableLanguages().Select(l => l.Tag).ToList();
+            }
+            catch (Exception ex)
+            {
+                Log.Warn("ocr languages: " + ex.Message);
+                return [];
+            }
+        }
+    }
+
+    void ISettingsHost.ApplyLanguage(string setting) => Loc.Instance.SetLanguage(setting);
+
+    // ---- history ----
+
+    IReadOnlyList<SubtitleRecord> ISettingsHost.HistoryRecords(int lines) => _presenter?.Records(lines) ?? [];
+    (string Src, string Tgt) ISettingsHost.Languages => Langs();
+    void ISettingsHost.ShowFix(string source, string translation) => _presenter?.ApplyFix(source, translation);
+
     void OnExit(object sender, ExitEventArgs e)
     {
         _subtitles?.Dispose();
@@ -704,6 +876,7 @@ public partial class App : Application, ISettingsHost
             _tray.Visible = false;
             _tray.Dispose();
         }
+        _trayIcons?.Dispose();
     }
 
     // ---- command-line modes used for diagnostics and automated checks ----

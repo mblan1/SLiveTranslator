@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SLiveTranslator.Hotkeys;
 using SLiveTranslator.Models;
+using SLiveTranslator.Translation.Providers;
 
 namespace SLiveTranslator.UI.Pages;
 
@@ -39,17 +40,15 @@ public sealed class HomeViewModel : ObservableObject
         }
     }
 
-    /// <summary>"Claude · claude-opus-5-5"; the free services alone for an unknown provider.</summary>
-    public string ProviderLine
+    public string ProviderLine => ProviderLineOf(Current.Translation, _host.Providers);
+
+    /// <summary>"Claude  ·  claude-opus-5-5"; the free services alone for an unknown provider (also the tray's status line).</summary>
+    public static string ProviderLineOf(TranslationSettings translation, IEnumerable<ITranslationProvider> providers)
     {
-        get
-        {
-            var translation = Current.Translation;
-            var provider = _host.Providers.FirstOrDefault(p => p.Id.Equals(translation.Provider, StringComparison.OrdinalIgnoreCase));
-            if (provider is null) return Loc.Instance["Translation.FreeProvider"];
-            string model = TranslationViewModel.SectionOf(translation, provider.Id).Model.Trim();
-            return model.Length > 0 ? $"{provider.DisplayName}  ·  {model}" : provider.DisplayName;
-        }
+        var provider = providers.FirstOrDefault(p => p.Id.Equals(translation.Provider, StringComparison.OrdinalIgnoreCase));
+        if (provider is null) return Loc.Instance["Translation.FreeProvider"];
+        string model = TranslationViewModel.SectionOf(translation, provider.Id).Model.Trim();
+        return model.Length > 0 ? $"{provider.DisplayName}  ·  {model}" : provider.DisplayName;
     }
 
     public string ProviderStatusText => _host.ProviderStatus.Text;

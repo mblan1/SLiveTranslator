@@ -503,6 +503,23 @@ public class CacheV2Tests
     }
 
     [Fact]
+    public async Task Importing_an_older_export_keeps_the_fixes_made_here_since_and_counts_them()
+    {
+        using var dir = new TempDir();
+        var cache = Cache(dir, Vi());
+        cache.SetUserOverride("en", "vi", "Roach", "Roach");
+        cache.SetUserOverride("en", "vi", "Kill the ghouls.", "Giết lũ ghoul.");
+        string export = dir.File("old-export.json");
+        cache.Export(export);
+
+        cache.SetUserOverride("en", "vi", "Roach", "Con Roach"); // fixed again today
+
+        Assert.Equal(0, cache.Import(export, out int kept));
+        Assert.Equal(1, kept); // the unchanged fix is the same text: nothing to keep
+        Assert.Equal(["Con Roach"], (await Translate(cache, null, "Roach")).Texts);
+    }
+
+    [Fact]
     public async Task A_version_1_file_can_be_imported()
     {
         using var dir = new TempDir();

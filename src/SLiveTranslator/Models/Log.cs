@@ -121,6 +121,44 @@ public sealed class LogWriter
         }
     }
 
+    /// <summary>The last <paramref name="count"/> lines of the log, read while the app may be writing it; empty when there is none.</summary>
+    public static IReadOnlyList<string> Tail(string path, int count)
+    {
+        try
+        {
+            if (!File.Exists(path)) return [];
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            var lines = new Queue<string>(count);
+            while (reader.ReadLine() is { } line)
+            {
+                if (lines.Count == count) lines.Dequeue();
+                lines.Enqueue(line);
+            }
+            return lines.ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return [];
+        }
+    }
+
+    /// <summary>Empties the log and removes its rotated copy.</summary>
+    /// <returns>False when another program holds the file.</returns>
+    public static bool Clear(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.WriteAllText(path, "");
+            File.Delete(RotatedPath(path));
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     internal static string RotatedPath(string path) =>
         Path.Combine(Path.GetDirectoryName(path)!, Path.GetFileNameWithoutExtension(path) + ".1" + Path.GetExtension(path));
 

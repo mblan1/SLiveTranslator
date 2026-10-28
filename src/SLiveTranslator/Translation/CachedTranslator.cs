@@ -84,7 +84,7 @@ public sealed class CachedTranslator : ITranslator
             DateTimeOffset.FromUnixTimeMilliseconds(Volatile.Read(ref Used)), Volatile.Read(ref Hits), Edited, ProfileVersion, AnsweredBy);
     }
 
-    readonly string _path;
+    string _path;
     readonly TimeSpan _saveDelay;
     readonly TimeProvider _time;
     readonly ConcurrentDictionary<EntryKey, Entry> _cache = new();
@@ -394,12 +394,17 @@ public sealed class CachedTranslator : ITranslator
         WriteFile(path, _cache.Values.OrderBy(e => Volatile.Read(ref e.Clock)).ToList());
     }
 
+    /// <inheritdoc cref="Import(string, out int)"/>
+    public int Import(string path) => Import(path, out _);
+
     /// <summary>
     /// Merges a cache file (either version) into this cache, as recently used entries. An imported entry replaces the
-    /// one there, except that a hand-fixed or edited entry is never replaced by one that is not.
+    /// one there, except that a line fixed or edited here keeps its text: the file may be an older export, and the fix
+    /// made here is the one the user means now.
     /// </summary>
+    /// <param name="kept">How many imported entries were left out for a fix made here.</param>
     /// <returns>How many entries were added or replaced.</returns>
-    public int Import(string path)
+    public int Import(string path, out int kept)
     {
         _loaded.Wait();
         List<Entry> entries;
@@ -407,14 +412,36 @@ public sealed class CachedTranslator : ITranslator
         using (var doc = JsonDocument.Parse(stream))
             entries = Parse(doc.RootElement, File.GetLastWriteTimeUtc(path), out _);
         int merged = 0;
+        kept = 0;
         foreach (var entry in entries)
         {
-            if (_cache.TryGetValue(entry.Key, out var existing) && existing.Edited && !entry.Edited) continue;
+            if (_cache.TryGetValue(entry.Key, out var existing) && existing.Edited)
+            {
+                if (existing.Translation != entry.Translation) kept++;
+                continue;
+            }
             Put(entry);
             merged++;
         }
         if (merged > 0) MarkDirty();
         return merged;
+    }
+
+    /// <summary>
+    /// The data folder moved: from now on the cache is saved to <paramref name="path"/>. It is written there at the next
+    /// save or <see cref="Flush"/>, even unchanged, so the new folder holds every entry kept in memory.
+    /// </summary>
+    public void Relocate(string path)
+    {
+        _loaded.Wait();
+        lock (_saveGate)
+        {
+            // The file found at start went along with the data: its pending backup (".corrupt", ".bak-v1") is made
+            // from the copy in the new folder, before the first save there writes over it.
+            if (_backupPath is { } backup) _backupPath = path + backup[_path.Length..];
+            _path = path;
+        }
+        Volatile.Write(ref _dirty, 1);
     }
 
     /// <summary>Writes the cache now if it changed or was used, waiting for a save in progress; for exit.</summary>

@@ -17,7 +17,7 @@ public sealed class DailyCharCounter
 {
     static readonly TimeSpan DefaultSaveDelay = TimeSpan.FromSeconds(30);
 
-    readonly string _path;
+    string _path;
     readonly TimeProvider _clock;
     readonly TimeSpan _saveDelay;
     readonly object _gate = new();
@@ -74,6 +74,20 @@ public sealed class DailyCharCounter
             await Task.Delay(_saveDelay);
             Flush();
         });
+    }
+
+    /// <summary>The data folder moved: the count is written to <paramref name="path"/> from the next write on (<see cref="Flush"/> writes it now).</summary>
+    public void Relocate(string path)
+    {
+        lock (_saveGate)
+        {
+            lock (_gate)
+            {
+                Roll();
+                _path = path;
+                _dirty = true;
+            }
+        }
     }
 
     /// <summary>Writes the count now if it changed; for exit.</summary>

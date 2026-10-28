@@ -1,0 +1,80 @@
+<Page x:Class="SLiveTranslator.UI.Pages.GeneralPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+      xmlns:l="clr-namespace:SLiveTranslator.UI"
+      Title="{Binding [Nav.General], Source={x:Static l:Loc.Instance}}">
+    <Page.Resources>
+        <ResourceDictionary Source="PageStyles.xaml"/>
+    </Page.Resources>
+    <StackPanel Margin="24,12,24,24">
+        <TextBlock Style="{StaticResource PageTitle}" Text="{Binding [General.Title], Source={x:Static l:Loc.Instance}}"/>
+
+        <ui:CardControl Icon="{ui:SymbolIcon LocalLanguage24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [General.Language], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [General.LanguageHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ComboBox Width="220" ItemsSource="{Binding Languages}" SelectedItem="{Binding SelectedLanguage}" DisplayMemberPath="Label"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon DarkTheme24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <TextBlock Style="{StaticResource Body}" Text="{Binding [General.Theme], Source={x:Static l:Loc.Instance}}"/>
+            </ui:CardControl.Header>
+            <ComboBox Width="220" ItemsSource="{Binding Themes}" SelectedItem="{Binding SelectedTheme}" DisplayMemberPath="Label"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon Rocket24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [General.Startup], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [General.StartupHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ui:ToggleSwitch IsChecked="{Binding StartWithWindows}"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon Wrench24}" Margin="0,0,0,16">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [General.Setup], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [General.SetupHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ui:Button Icon="{ui:SymbolIcon PlayCircle24}" Command="{Binding RunSetupCommand}"
+                       Content="{Binding [General.SetupButton], Source={x:Static l:Loc.Instance}}"/>
+        </ui:CardControl>
+
+        <Border Style="{StaticResource Card}">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="180"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.ColumnSpan="2" Style="{StaticResource SectionTitle}" Text="{Binding [General.About], Source={x:Static l:Loc.Instance}}"/>
+                <TextBlock Grid.Row="1" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.Version], Source={x:Static l:Loc.Instance}}"/>
+                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Body}" Text="{Binding Version}"/>
+                <TextBlock Grid.Row="2" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.Runtime], Source={x:Static l:Loc.Instance}}"/>
+                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Body}" Text="{Binding Runtime}"/>
+                <TextBlock Grid.Row="3" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.System], Source={x:Static l:Loc.Instance}}"/>
+                <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Body}" Text="{Binding OsDescription}"/>
+                <TextBlock Grid.Row="4" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.Ocr], Source={x:Static l:Loc.Instance}}"/>
+                <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Body}" Text="{Binding OcrLanguages}"/>
+                <TextBlock Grid.Row="5" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.DataFolder], Source={x:Static l:Loc.Instance}}"/>
+                <TextBox Grid.Row="5" Grid.Column="1" IsReadOnly="True" BorderThickness="0" Background="Transparent" Padding="0" TextWrapping="Wrap"
+                         VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Text="{Binding DataFolder, Mode=OneWay}"/>
+            </Grid>
+        </Border>
+    </StackPanel>
+</Page>

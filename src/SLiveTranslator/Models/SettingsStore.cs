@@ -41,7 +41,7 @@ public sealed class SettingsStore
 
     static readonly JsonDocumentOptions DocumentOptions = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 
-    readonly string _path;
+    string _path;
     readonly Func<string, string> _protectKey;
     readonly Loc _loc;
     (string Key, object?[] Args)? _problem;
@@ -68,6 +68,9 @@ public sealed class SettingsStore
     }
 
     public string FilePath => _path;
+
+    /// <summary>The data folder moved: the next save writes to <paramref name="path"/>, keeping what was read from the old file.</summary>
+    public void Relocate(string path) => _path = path;
     public string V1BackupPath => _path + ".bak-v1";
     public string CorruptCopyPath => _path + ".corrupt";
 

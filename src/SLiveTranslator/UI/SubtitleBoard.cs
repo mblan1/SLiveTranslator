@@ -9,7 +9,8 @@ namespace SLiveTranslator.UI;
 /// <param name="Source">The text as read from the screen: what the translation was made from and what a fix is stored for.</param>
 /// <param name="Translation">Null while it is not there yet.</param>
 /// <param name="Provider">The provider key of the translation ("user" after a fix); null while there is none.</param>
-public sealed record SubtitleRecord(int Id, string Source, string? Translation, string? Provider);
+/// <param name="Src">The languages the line was translated between, which a fix is stored for; "" when not known.</param>
+public sealed record SubtitleRecord(int Id, string Source, string? Translation, string? Provider, string Src = "", string Tgt = "");
 
 /// <summary>
 /// The dialog lines of the session and which of them the subtitle box shows. Plain state with no WPF, so the rules
@@ -25,6 +26,8 @@ internal sealed class SubtitleBoard
         public string Original { get; set; } = "";
         public string? Translated { get; set; }
         public string? Provider { get; set; }
+        public string Src { get; set; } = "";
+        public string Tgt { get; set; } = "";
         public bool Failed { get; set; }
         /// <summary>The current reading is unreliable.</summary>
         public bool LowConfidence { get; set; }
@@ -41,12 +44,12 @@ internal sealed class SubtitleBoard
     public int Count => _entries.Count;
 
     /// <summary>A new line, or a shown line that grew. A grown line keeps its old translation until the new one arrives.</summary>
-    public void Detected(int id, string original, bool lowConfidence)
+    public void Detected(int id, string original, bool lowConfidence, string src = "", string tgt = "")
     {
         var entry = Find(id);
         if (entry is null)
         {
-            entry = new Entry { Id = id };
+            entry = new Entry { Id = id, Src = src, Tgt = tgt };
             _entries.Add(entry);
             Trim();
         }
@@ -103,7 +106,7 @@ internal sealed class SubtitleBoard
 
     /// <summary>The latest lines with their source and provider, oldest first; for the history list and its hand fix.</summary>
     public IReadOnlyList<SubtitleRecord> Records(int lines) =>
-        _entries.Skip(Math.Max(0, _entries.Count - lines)).Select(e => new SubtitleRecord(e.Id, e.Original, e.Translated, e.Provider)).ToList();
+        _entries.Skip(Math.Max(0, _entries.Count - lines)).Select(e => new SubtitleRecord(e.Id, e.Original, e.Translated, e.Provider, e.Src, e.Tgt)).ToList();
 
     /// <summary>The box was hidden: the lines so far stay in the history only.</summary>
     public void CloseWindow() => _windowStart = _entries.Count;

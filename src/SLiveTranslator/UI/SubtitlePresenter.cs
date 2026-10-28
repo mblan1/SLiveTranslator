@@ -106,9 +106,12 @@ public sealed class SubtitlePresenter : ISubtitleSink
 
     // ---- ISubtitleSink ----
 
+    /// <summary>The languages of the subtitles being watched; each new line keeps them for a fix made later.</summary>
+    public (string Src, string Tgt) Languages { get; set; } = ("", "");
+
     public void LineDetected(int id, string original, bool lowConfidence) => _ui.BeginInvoke(() =>
     {
-        _board.Detected(id, original, lowConfidence);
+        _board.Detected(id, original, lowConfidence, Languages.Src, Languages.Tgt);
         _live = true;
         _linger.Stop();
         Render();

@@ -15,13 +15,19 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <ui:TitleBar x:Name="AppTitleBar" Grid.Row="0" Title="{Binding [Main.Title], Source={x:Static l:Loc.Instance}}"/>
+        <ui:TitleBar x:Name="AppTitleBar" Grid.Row="0" Title="{Binding [Main.Title], Source={x:Static l:Loc.Instance}}">
+            <ui:TitleBar.Icon>
+                <ui:ImageIcon Source="pack://application:,,,/Assets/app.ico"/>
+            </ui:TitleBar.Icon>
+        </ui:TitleBar>
 
         <ui:NavigationView x:Name="RootNavigation" Grid.Row="1" PaneDisplayMode="Left" IsBackButtonVisible="Collapsed"
                            IsPaneToggleVisible="True" OpenPaneLength="240">
             <ui:NavigationView.MenuItems>
                 <ui:NavigationViewItem Content="{Binding [Nav.Home], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon Home24}"
                                        TargetPageType="{x:Type pages:HomePage}"/>
+                <ui:NavigationViewItem Content="{Binding [Nav.History], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon History24}"
+                                       TargetPageType="{x:Type pages:HistoryPage}"/>
                 <ui:NavigationViewItem Content="{Binding [Nav.Translation], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon Translate24}"
                                        TargetPageType="{x:Type pages:TranslationPage}"/>
                 <ui:NavigationViewItem Content="{Binding [Nav.Profile], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon Games24}"
@@ -61,6 +67,9 @@
                            Text="{Binding [Main.Unsaved], Source={x:Static l:Loc.Instance}}"/>
             </DockPanel>
         </Border>
+
+        <pages:WelcomeView Grid.Row="1" Grid.RowSpan="2" DataContext="{Binding Welcome}"
+                           Visibility="{Binding IsOpen, Converter={x:Static l:VisibleWhen.Instance}}"/>
 
         <ui:ContentDialogHost x:Name="DialogHost" Grid.Row="0" Grid.RowSpan="3"/>
     </Grid>

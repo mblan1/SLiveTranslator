@@ -90,6 +90,12 @@ public sealed class DataPaths
         return check.Wait(FolderCheckTimeout) && check.Result;
     }
 
+    /// <summary>The paths of a data folder that was not resolved from the exe and AppData (a folder the user switched to).</summary>
+    internal static DataPaths At(string root, bool isPortable) => new(root, isPortable);
+
+    /// <summary>The app moved its data to <paramref name="paths"/> while running: every path asked for from now on is there.</summary>
+    internal static void Use(DataPaths paths) => Volatile.Write(ref _current, paths);
+
     /// <summary>Points every path of this process at <paramref name="dir"/> so tests never write to the user's real data folder.</summary>
-    internal static void UseForTests(string dir) => Volatile.Write(ref _current, new DataPaths(dir, isPortable: false));
+    internal static void UseForTests(string dir) => Use(new DataPaths(dir, isPortable: false));
 }

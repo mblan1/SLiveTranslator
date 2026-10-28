@@ -39,7 +39,7 @@ public sealed class GameProfileStore
         AllowTrailingCommas = true,
     };
 
-    readonly string _dir;
+    string _dir;
     readonly IReadOnlyDictionary<string, byte[]> _seeds;
     readonly object _gate = new();
     volatile Loaded? _loaded;
@@ -116,6 +116,25 @@ public sealed class GameProfileStore
                 : loaded.Profiles.Contains(profile) ? loaded.Profiles
                 : [.. loaded.Profiles, profile];
             _loaded = loaded with { Profiles = profiles, Files = files };
+        }
+    }
+
+    /// <summary>
+    /// The data folder moved and its profiles were copied along: each loaded profile is saved to its file's copy in
+    /// <paramref name="dir"/> from now on, so a profile open in the editor stays the one in use.
+    /// </summary>
+    public void Relocate(string dir)
+    {
+        lock (_gate)
+        {
+            string old = _dir;
+            _dir = dir;
+            if (_loaded is { } loaded)
+                _loaded = loaded with
+                {
+                    Files = loaded.Files.ToDictionary(f => f.Key, f => Path.Combine(dir, Path.GetRelativePath(old, f.Value)),
+                        (IEqualityComparer<GameProfile>)ReferenceEqualityComparer.Instance),
+                };
         }
     }
 

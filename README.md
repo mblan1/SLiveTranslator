@@ -1,169 +1,176 @@
 # SLiveTranslator
 
-Live, on-screen translation for games on Windows. It reads text off the screen with the OCR engine
-built into Windows, translates it, and draws the translation on a transparent click-through overlay
-on top of the game.
+<img src="src/SLiveTranslator/Assets/app-256.png" alt="" width="96" align="right">
 
-Two ways to use it:
+Live, on-screen translation for games on Windows. It reads the game's text with the OCR engine built into
+Windows, translates it, and draws the translation on a transparent, click-through overlay over the game.
+Nothing is injected into the game.
 
-* **Subtitle mode** – pick the strip where the game shows subtitles once. The app watches it and shows
-  the translation right next to it. The last 3 lines stay on screen (older ones dimmed) and remain for
-  a few seconds after the game hides them, so fast cutscene dialog can still be read. Lines are
-  translated in the background, several at once, so no line is skipped while another one translates.
-* **Dialog history** – a panel with the recent dialog (translation plus the original) for catching up
-  on anything that went by too fast.
-* **Translate screen** – press a hotkey while hovering an item, reading a tooltip, or looking at a
-  menu. Every piece of text in the game window is translated in place, each label drawn over the
-  original text. Labels disappear after a few seconds (configurable) or when you press the clear hotkey.
+* **Subtitles** – pick the strip where the game shows its subtitles once. The app watches it and shows each
+  line's translation next to it. The last lines stay on screen a little longer, so fast cutscene dialog can
+  still be read, and no line is skipped while another one is translating.
+* **Dialog history** – a panel with the recent lines (translation and original) to catch up on what went by.
+* **Translate screen** – one hotkey translates every piece of text in the game window (tooltips, item
+  names, menus), each label drawn over its original.
 
-Translations are cached on disk, so item names and lines you have seen before appear instantly
-without any network call.
+It ships with a profile for **The Witcher 3** (English → Vietnamese): names and game terms (Geralt, Ciri,
+Roach, witcher, ghoul, Kaer Morhen …) are kept, characters address each other consistently (Vesemir and
+Ciri: ta/cháu, Geralt and Yennefer: anh/em), and common machine-translation mistakes are corrected.
 
-Status messages (subtitles on/off, translating, errors) appear at the top of the game screen. Windows
-hides tray notifications while a game is running, so the app does not rely on them. While subtitle
-mode runs, a small green "Subtitles on" badge sits at the corner of the region and the tray icon turns
-green. Only one copy of the app runs at a time.
+## Install
 
-## Requirements
+1. Download `SLiveTranslator.exe` (one file, about 190 MB, no .NET install needed) and put it in any folder. It
+   uses about 60 MB of memory while it waits in the tray.
+2. Run it. It lives in the system tray (the blue speech-bubble icon; a green dot means subtitles are on).
+3. The first start opens a short setup: language of the app, translation service, subtitle region, and
+   a hotkey test. Everything can be changed later in the main window (double-click the tray icon).
 
-* Windows 10 version 2004 or later / Windows 11 (the overlay uses `WDA_EXCLUDEFROMCAPTURE` so that
-  it never captures its own labels).
-* .NET 10 SDK to build (`dotnet --version` should print 10.x).
-* A Windows OCR language for the language the game is in. English is normally installed already.
-  To add another one: **Settings › Time & Language › Language & region › Add a language**, keep
-  *Optical character recognition* ticked. Or from an elevated PowerShell:
+Requirements:
 
-  ```powershell
-  Add-WindowsCapability -Online -Name "Language.OCR~~~ja-JP~0.0.1.0"
-  ```
+* Windows 10 version 2004 or later, or Windows 11.
+* A Windows OCR language for the game's language. English is normally installed. To add one:
+  **Settings › Time & Language › Language & region › Add a language**, with *Optical character recognition*.
+* The game in **borderless or windowed** mode. Exclusive full-screen games cannot be captured.
 
-  (`Get-WindowsCapability -Online -Name "Language.OCR*"` lists what is available.)
-* The game must run in **borderless or windowed mode**. Exclusive full-screen games cannot be captured
-  and do not show overlays.
-
-## Build and run
-
-```bash
-dotnet build
-dotnet run --project src/SLiveTranslator
-```
-
-Or run the built executable directly:
-
-```
-src\SLiveTranslator\bin\Debug\net10.0-windows10.0.22621.0\SLiveTranslator.exe
-```
-
-The app lives in the system tray (blue "T" icon). The first start opens the settings window so you
-can choose the language to translate into.
-
-Run the tests with:
-
-```bash
-dotnet test
-```
-
-(One MyMemory test needs internet access.)
+**Start with Windows** is a switch on the *General & About* page; the app then starts quietly in the tray.
 
 ## Using it
 
-| Default hotkey   | Action                                                                 |
-| ---------------- | ---------------------------------------------------------------------- |
-| `Ctrl+Shift+T`   | Translate the active (game) window; text under the mouse comes first   |
-| `Ctrl+Shift+S`   | Subtitle mode on/off (asks for the region the first time)              |
-| `Ctrl+Shift+R`   | Pick / change the subtitle region (drag a rectangle, Esc cancels)      |
-| `Ctrl+Shift+H`   | Dialog history panel on/off                                            |
-| `Ctrl+Shift+X`   | Clear the overlay and stop subtitle mode                               |
+| Default hotkey | Action                                                                 |
+| -------------- | ---------------------------------------------------------------------- |
+| `Ctrl+Shift+S` | Subtitles on/off (asks for the region the first time)                  |
+| `Ctrl+Shift+R` | Select the subtitle region (drag a rectangle, Esc cancels)             |
+| `Ctrl+Shift+T` | Translate the game window; text under the mouse comes first            |
+| `Ctrl+Shift+H` | Dialog history on/off                                                  |
+| `Ctrl+Shift+X` | Clear the overlay and stop subtitles                                   |
 
-All hotkeys can be changed in Settings (tray icon › Settings, or double-click the icon).
+Every hotkey can be recorded anew, switched off or reset on the *Hotkeys* page. A hotkey another program
+already uses is shown as *In use* instead of silently not working.
 
-Typical flow for a game with dialogue subtitles:
+Typical flow:
 
-1. Start the game in borderless mode, start SLiveTranslator.
-2. When the first subtitle appears, press `Ctrl+Shift+R` and drag a box around **only the subtitle
-   lines** (for most games a wide, low strip near the bottom). Not the whole screen: that is slow,
-   picks up the HUD, and misses lines.
-3. Press `Ctrl+Shift+S`. "Subtitles ON" appears at the top of the screen and the translation follows
-   the dialogue just below (or above) that box. Press `Ctrl+Shift+H` to re-read earlier lines.
-4. Open your inventory, hover an item and press `Ctrl+Shift+T` to translate the tooltip and item names.
+1. Start the game in borderless mode and start SLiveTranslator.
+2. When the first subtitle shows, press `Ctrl+Shift+R` and drag a box around **only the subtitle lines**
+   (a wide, low strip). Not the whole screen: that is slow, picks up the HUD and misses lines.
+3. Press `Ctrl+Shift+S`. "Subtitles ON" appears and the translation follows the dialog. `Ctrl+Shift+H`
+   shows earlier lines.
+4. In the inventory, hover an item and press `Ctrl+Shift+T` to translate the tooltip.
 
-## Settings
+Status messages appear at the top of the game screen (Windows hides tray notifications in games). Which
+messages show, for how long, where, and with or without a sound is set on the *Notifications* page.
 
-| Setting                        | Notes                                                                                         |
-| ------------------------------ | --------------------------------------------------------------------------------------------- |
-| Game text language (OCR)       | One of the Windows OCR languages installed on this PC. Must match the game's language.         |
-| Translate into                 | Google-style code: `vi`, `en`, `ja`, `ko`, `zh-CN`, …                                          |
-| Translation service            | **Free**: Google Translate, with MyMemory as automatic backup (no key), or **Claude API**      |
-| MyMemory email                 | Optional. Raises the MyMemory free limit from 5,000 to 50,000 characters per day.              |
-| Claude API key / model         | Only for the Claude service. Leave the key empty to use `ANTHROPIC_API_KEY` or an `ant auth login` profile. |
-| Subtitle region                | Only the strip where subtitles appear. A near-full-screen region burns the free quota fast.    |
-| Subtitle check interval        | How often the subtitle region is checked (ms). 300 is a good default.                          |
-| Screen labels auto-hide        | Seconds before the translate-screen labels disappear (0 = stay until cleared).                 |
+## Translation services
 
-Settings, the translation cache and a log file are stored in `%APPDATA%\SLiveTranslator`
-(tray icon › *Open data folder*).
+The free services are always the last fallback: when the chosen service has no key, runs out of credit or
+does not answer, the free ones translate until it is back, and a notice says so.
 
-### Claude as the translator
+| Service | Needs | Notes |
+| --- | --- | --- |
+| **Free** (default) | nothing | Google Translate, then MyMemory. MyMemory allows 5,000 characters a day, 50,000 with an email (Translation page). |
+| **Claude** | Anthropic API key | Best for names, pronouns and idioms: it gets the game profile and the recent dialog with every line. |
+| **OpenAI** | OpenAI API key | Responses API with structured output. |
+| **Gemini** | Google AI Studio key | Has a free tier (Google may use free-tier data). |
+| **OpenAI-compatible** | server address, key if the server needs one | Presets for OpenRouter, DeepSeek, Groq, Mistral, xAI, and local Ollama or LM Studio. |
+| **DeepL** | DeepL API key | DeepL API Free gives 500,000 characters a month. |
+| **Microsoft Translator** | Azure key and region | |
+| **Google Cloud Translation** | API key | |
 
-Claude gets all the text from one screen in a single request with instructions that it is game UI
-text, so it keeps item names, numbers and context consistent and quietly fixes OCR mistakes.
-It is slower than Google for the first look at a screen but noticeably better for dialogue and
-tooltips. The default model is `claude-opus-5-5` with low effort; server-side refusal fallbacks are
-enabled so a safety-classifier decline is re-served by a fallback model within the same call.
+On the *Translation* page, enter the key and the app checks it right away: the model box stays empty until
+the key is valid, then lists the models with ★ Recommended, Balanced and ⚡ Fastest marked. A saved model
+is never changed for you. Claude requests use server-side refusal fallbacks on the models that support
+them (Fable 5.1, Opus 5.5, Opus 5, Sonnet 5.5), so a line a safety classifier declines is answered by a
+fallback model in the same call.
+
+API keys are encrypted with Windows DPAPI for your Windows account. They are never written to logs,
+exports or the diagnostics text; a copied data folder on another PC or account asks for them again.
+Only the text being translated is sent, and only to the service you chose.
+
+## Game profile and fixing translations
+
+The *Game profile* page edits the profile in use (chosen automatically from the game's process):
+
+* **Keep** – names and terms that stay as they are.
+* **Glossary** – fixed translations of game terms.
+* **Characters** – who speaks to whom and the forms of address (for AI services).
+* **Fix rules** – corrections applied to machine translations, with optional "unless" words.
+
+A line translated wrong can be fixed by hand: in the main window's history, or in the cache manager on
+the *Storage & cache* page. A fixed line always wins, for every service.
+
+## Data folder
+
+Settings, the translation cache, game profiles and the log are in `%APPDATA%\SLiveTranslator`. The
+*Storage & cache* page shows their sizes, moves the folder elsewhere, clears or exports the cache, and
+shows the log. For a **portable** install, put an empty file named `portable.flag` next to the exe: the
+data then lives in a `Data` folder beside it.
+
+## Build from source
+
+Needs the .NET 10 SDK.
+
+```bash
+dotnet build SLiveTranslator.slnx
+dotnet test SLiveTranslator.slnx
+dotnet run --project src/SLiveTranslator
+```
+
+The tests make no network calls (tests against the real services run only with `SLT_LIVE=1`).
+
+The single-file exe:
+
+```powershell
+.\publish.ps1
+```
+
+It writes `dist\SLiveTranslator.exe` (self-contained, win-x64, profile
+`src/SLiveTranslator/Properties/PublishProfiles/win-x64.pubxml`).
+
+The icon is drawn by a small tool, not part of the solution: `dotnet run --project tools/IconGen` writes
+`src/SLiveTranslator/Assets/app.ico` (see `tools/IconGen/README.md`).
+
+### Diagnostics
+
+```
+SLiveTranslator.exe --selftest <folder>          # renders the overlays and the main window; writes PNGs and selftest.txt
+SLiveTranslator.exe --bench-subtitles <folder>   # replays painted subtitle scenes through the real OCR; writes timings
+SLiveTranslator.exe --translate-screen <folder>  # OCR + translate the primary monitor (real translation requests)
+```
 
 ## How it works
 
 ```
-screen region ──► Windows.Media.Ocr ──► lines ──► paragraph grouping ──► translator (cached) ──► overlay
+screen region ─► Windows OCR (plain + white-text mask) ─► subtitle tracker ─► profile + context ─► translator chain ─► cache ─► overlay
 ```
 
-* `Capture/ScreenCapture.cs` – GDI capture of a rectangle or of the foreground window.
-* `Ocr/WindowsOcrEngine.cs` – Windows OCR, one call at a time. Subtitles are read at 1x (fast) unless
-  the text is small; translate-screen upscales 2x for small UI text.
-* `Services/TextUtil.cs` – merges stacked OCR lines into paragraphs so tooltips translate as one unit.
-* `Services/SubtitleTracker.cs` – turns per-frame OCR text into dialog lines: a line counts once it is
-  read twice (re-checked after 100 ms). A line seen in the last 12 seconds is never reported again, however
-  differently OCR misreads it (letters-only trigram comparison, tuned on real misreadings). Garbled readings
-  are held back until a clean one arrives; a growing line updates instead of repeating.
-* `Services/SubtitleWatcher.cs` – polls the region, skips OCR when pixels did not change, and reads each
-  frame twice: as is and through a white-text mask (`Ocr/ImageFilters.cs`) that removes the moving scene
-  behind white subtitles; the cleaner reading wins. Separate text blocks (subtitle, a dialog choice, a key
-  hint) are translated separately. Lines are translated in the background (up to 3 at once). It warns when
-  subtitles touch the edge of the region.
-* `Services/ScreenTranslator.cs` – one-shot capture → OCR → translate for the translate-screen hotkey;
-  text nearest the mouse is translated first and labels appear batch by batch.
-* `UI/SubtitlePresenter.cs` – keeps the session's dialog lines for the subtitle box and the history panel.
-* `Translation/` – `GoogleTranslator` (all strings of a screen in one request, pauses 10, 30, then 60 minutes when blocked),
-  `MyMemoryTranslator` (uses MyMemory's machine translation, not its crowd-sourced matches, which are
-  often unrelated movie lines), `FallbackTranslator` (tries the next service when one is blocked or over quota),
-  `ClaudeTranslator` and the on-disk `CachedTranslator`.
-* `UI/OverlayWindow.xaml` – transparent, topmost, click-through window stretched over the monitor
-  that contains the game; excluded from screen capture.
-* `Hotkeys/HotkeyManager.cs` – system-wide hotkeys via `RegisterHotKey`.
-
-## Diagnostics
-
-Two command-line modes help when something looks wrong:
-
-```
-SLiveTranslator.exe --selftest <folder>          # renders sample labels; writes selftest_overlay.png, selftest_screen.png, selftest.txt
-SLiveTranslator.exe --translate-screen <folder>  # OCR + translate the primary monitor; writes translate_screen.txt and an annotated png
-```
+* `Services/SubtitleWatcher.cs` – polls the region and skips frames whose white text did not change. It
+  reads the frame and its white-text mask, keeping the cleaner reading.
+* `Services/SubtitleTracker.cs` – turns readings into dialog lines: confirmed against recent readings, never
+  repeated however differently OCR misreads them, updated when a line grows.
+* `Translation/` – the providers (`Providers/`), `ProfileTranslator` (keep names protected, fix rules),
+  `FallbackTranslator` (next service on failure), `CachedTranslator` (hand fixes win) and `ProviderRegistry`.
+* `UI/` – the click-through overlays (`Overlay/`), the main window and its pages (`Pages/`), the notifier
+  surface and the English/Vietnamese strings (`Loc`, `Assets/Strings`).
 
 ## Known limitations
 
-* Windows OCR is fast and needs no downloads, but heavily stylised fonts can be misread. White subtitles
-  over snow or bright sky are the hardest case: neither the plain frame nor the white-text mask reads them
-  well. A misread word ("Ild" for "I'd") is left untranslated, so a few English fragments can remain.
-* The free Google endpoint is unofficial. Google blocks networks it considers automated (HTTP 429 or a
-  captcha page); some shared or office networks are blocked from the start. The app then pauses Google
-  (10, 30, then 60 minutes) and uses MyMemory. The first translation after starting the app pays about
-  half a second for the Google check.
-* Typical subtitle delay with MyMemory: the line is detected 0.1–0.4 s after it appears and the
-  translation shows about 1–1.6 s after it appears. Most of that is the MyMemory request itself.
-* MyMemory allows 5,000 characters per day without an email, 50,000 with one. Item names and lines are
-  cached, so repeats cost nothing. For long sessions or better quality use the Claude API.
-* Layout is computed in physical pixels and converted with the monitor's DPI scale. Mixed-DPI
-  multi-monitor setups are supported in principle but have only been checked at 100 %.
-* Anti-cheat systems generally do not mind screen capture + an overlay window, but the app does not
-  inject into the game in any way, so it cannot translate text that is not drawn on screen.
+* Heavily stylised fonts can be misread. White subtitles over snow or bright sky are the hardest case.
+* The free Google endpoint is unofficial and blocks some networks; the app then pauses it and uses MyMemory.
+* Mixed-DPI multi-monitor setups are supported in principle but were only checked at 100 %.
+
+## Tiếng Việt
+
+SLiveTranslator dịch chữ trong game ngay trên màn hình: phụ đề, chú thích vật phẩm, menu. Ứng dụng đọc chữ
+bằng OCR có sẵn của Windows, dịch, rồi hiện bản dịch trên một lớp phủ trong suốt, không can thiệp vào game.
+
+* **Cài đặt:** tải `SLiveTranslator.exe` (một tệp, không cần cài .NET) và chạy. Biểu tượng nằm ở khay hệ thống;
+  chấm xanh nghĩa là phụ đề đang bật. Lần đầu chạy sẽ có trình hướng dẫn: ngôn ngữ, dịch vụ dịch, vùng phụ đề,
+  thử phím tắt. Muốn mở cùng Windows, bật mục *Khởi động cùng Windows* ở trang *Chung & Giới thiệu*.
+* **Dùng:** chơi game ở chế độ cửa sổ hoặc borderless. `Ctrl+Shift+R` chọn vùng phụ đề (chỉ dải phụ đề),
+  `Ctrl+Shift+S` bật/tắt phụ đề, `Ctrl+Shift+T` dịch cả màn hình, `Ctrl+Shift+H` xem lịch sử hội thoại,
+  `Ctrl+Shift+X` xóa lớp phủ.
+* **Dịch vụ:** mặc định là dịch miễn phí (Google, rồi MyMemory). Có thể dùng Claude, OpenAI, Gemini (có gói miễn
+  phí), DeepL, Microsoft hoặc Google Cloud: nhập khóa API, ứng dụng kiểm tra ngay rồi mới hiện danh sách mô hình.
+  Khóa được mã hóa cho tài khoản Windows của bạn.
+* **The Witcher 3:** có sẵn hồ sơ giữ nguyên tên riêng và thuật ngữ, xưng hô nhất quán. Dòng dịch sai có thể
+  sửa tay trong lịch sử hoặc trong trang *Lưu trữ & bộ nhớ đệm*; bản sửa tay luôn được ưu tiên.
+* **Dữ liệu:** nằm ở `%APPDATA%\SLiveTranslator`. Đặt tệp `portable.flag` cạnh exe để lưu dữ liệu ngay bên cạnh.

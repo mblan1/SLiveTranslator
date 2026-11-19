@@ -12,6 +12,7 @@ internal static class Native
     public const long WS_EX_LAYERED = 0x80000;
     public const long WS_EX_NOACTIVATE = 0x08000000;
 
+    public const uint WDA_NONE = 0x0;
     public const uint WDA_EXCLUDEFROMCAPTURE = 0x11;
 
     public static readonly IntPtr HWND_TOPMOST = new(-1);
@@ -59,8 +60,19 @@ internal static class Native
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
     [DllImport("user32.dll")] public static extern IntPtr MonitorFromRect(ref RECT rect, uint flags);
     [DllImport("shcore.dll")] public static extern int GetDpiForMonitor(IntPtr monitor, int dpiType, out uint dpiX, out uint dpiY);
-    [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr GetWindowLongPtrW(IntPtr hWnd, int nIndex);
-    [DllImport("user32.dll", SetLastError = true)] public static extern IntPtr SetWindowLongPtrW(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr GetWindowLongPtrW(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", SetLastError = true)] static extern IntPtr SetWindowLongPtrW(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+    [DllImport("user32.dll", SetLastError = true)] static extern int GetWindowLongW(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", SetLastError = true)] static extern int SetWindowLongW(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    /// <summary>GetWindowLongPtr, which 32-bit user32 does not export (it is a macro for GetWindowLong there).</summary>
+    public static IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex) =>
+        IntPtr.Size == 8 ? GetWindowLongPtrW(hWnd, nIndex) : new IntPtr(GetWindowLongW(hWnd, nIndex));
+
+    /// <summary>SetWindowLongPtr, with the same 32-bit fallback as <see cref="GetWindowLongPtr"/>.</summary>
+    public static IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr value) =>
+        IntPtr.Size == 8 ? SetWindowLongPtrW(hWnd, nIndex, value) : new IntPtr(SetWindowLongW(hWnd, nIndex, value.ToInt32()));
+
     [DllImport("user32.dll", SetLastError = true)] public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
     [DllImport("user32.dll", SetLastError = true)] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll", SetLastError = true)] public static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);

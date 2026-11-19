@@ -43,6 +43,97 @@
         <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}"/>
     </Style>
 
+    <l:HexBrush x:Key="HexBrush"/>
+
+    <!-- The two boxes on the screen pictures: the same colours as on the picker (cyan reads, amber shows). -->
+    <SolidColorBrush x:Key="ReadBrush" Color="#60CDFF"/>
+    <SolidColorBrush x:Key="ReadFill" Color="#2960CDFF"/>
+    <SolidColorBrush x:Key="ShowBrush" Color="#FFB547"/>
+    <SolidColorBrush x:Key="ShowFill" Color="#33FFB547"/>
+    <SolidColorBrush x:Key="ScreenSky" Color="#25303C"/>
+    <SolidColorBrush x:Key="ScreenGround" Color="#141A20"/>
+
+    <DrawingBrush x:Key="Checker" TileMode="Tile" Viewport="0,0,10,10" ViewportUnits="Absolute">
+        <DrawingBrush.Drawing>
+            <DrawingGroup>
+                <GeometryDrawing Brush="#D6D6D6" Geometry="M0,0 H2 V2 H0Z"/>
+                <GeometryDrawing Brush="#9A9A9A" Geometry="M0,0 H1 V1 H0Z M1,1 H2 V2 H1Z"/>
+            </DrawingGroup>
+        </DrawingBrush.Drawing>
+    </DrawingBrush>
+
+    <Style x:Key="SmallLabel" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}"/>
+    </Style>
+
+    <Style x:Key="Tag" TargetType="Border">
+        <Setter Property="CornerRadius" Value="3"/>
+        <Setter Property="Padding" Value="5,1"/>
+    </Style>
+
+    <!-- A choice drawn as a selectable card: a RadioButton whose content is the card's inside. -->
+    <Style x:Key="OptionCard" TargetType="RadioButton">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="Bd" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="2" CornerRadius="8" Padding="16,14">
+                        <ContentPresenter/>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource CardBackgroundFillColorSecondaryBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource FocusStrokeColorOuterBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- A colour swatch: Tag is the colour ("#RRGGBB", "" for transparent), a ring shows the one picked. -->
+    <Style x:Key="Swatch" TargetType="RadioButton">
+        <Setter Property="Width" Value="34"/>
+        <Setter Property="Height" Value="34"/>
+        <Setter Property="Margin" Value="0,0,6,0"/>
+        <Setter Property="Cursor" Value="Hand"/>
+        <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="Ring" CornerRadius="8" BorderThickness="2" BorderBrush="Transparent" Padding="2" Background="Transparent">
+                        <Grid>
+                            <Border x:Name="Checks" CornerRadius="5" Background="{StaticResource Checker}" Visibility="Collapsed"/>
+                            <Border CornerRadius="5" BorderThickness="1" BorderBrush="#60808080"
+                                    Background="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource HexBrush}}"/>
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="Tag" Value="">
+                            <Setter TargetName="Checks" Property="Visibility" Value="Visible"/>
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Ring" Property="BorderBrush" Value="{DynamicResource AccentFillColorDefaultBrush}"/>
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Ring" Property="BorderBrush" Value="{DynamicResource FocusStrokeColorOuterBrush}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <Style x:Key="Card" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}"/>

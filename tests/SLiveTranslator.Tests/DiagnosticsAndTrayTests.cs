@@ -113,7 +113,7 @@ public class DiagnosticsAndTrayTests
         Assert.Equal(
         [
             TrayCommand.Status, TrayCommand.Separator, TrayCommand.Subtitles, TrayCommand.TranslateScreen, TrayCommand.History, TrayCommand.SelectRegion,
-            TrayCommand.Clear, TrayCommand.Separator, TrayCommand.Providers, TrayCommand.Mute, TrayCommand.Separator, TrayCommand.Open,
+            TrayCommand.Clear, TrayCommand.DisplayMode, TrayCommand.Separator, TrayCommand.Providers, TrayCommand.Mute, TrayCommand.Separator, TrayCommand.Open,
             TrayCommand.OpenDataFolder, TrayCommand.Separator, TrayCommand.Exit,
         ], items.Select(i => i.Command));
         var status = items[0];
@@ -126,8 +126,9 @@ public class DiagnosticsAndTrayTests
         Assert.Equal("Ctrl+Shift+H", Gesture(TrayCommand.History));
         Assert.Equal("Ctrl+Shift+R", Gesture(TrayCommand.SelectRegion));
         Assert.Equal("Ctrl+Shift+X", Gesture(TrayCommand.Clear));
+        Assert.Equal("Ctrl+Shift+P", Gesture(TrayCommand.DisplayMode));
         Assert.Equal("", Gesture(TrayCommand.Open));
-        Assert.Equal(("Open SLiveTranslator", "Exit"), (items[11].Text, items[^1].Text));
+        Assert.Equal(("Open SLiveTranslator", "Exit"), (items[12].Text, items[^1].Text));
     }
 
     [Fact]

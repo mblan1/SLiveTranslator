@@ -23,6 +23,10 @@
 
         <ui:NavigationView x:Name="RootNavigation" Grid.Row="1" PaneDisplayMode="Left" IsBackButtonVisible="Collapsed"
                            IsPaneToggleVisible="True" OpenPaneLength="240">
+            <ui:NavigationView.AutoSuggestBox>
+                <ui:AutoSuggestBox x:Name="PageSearch" Icon="{ui:SymbolIcon Search24}"
+                                   PlaceholderText="{Binding [Main.Search], Source={x:Static l:Loc.Instance}}"/>
+            </ui:NavigationView.AutoSuggestBox>
             <ui:NavigationView.MenuItems>
                 <ui:NavigationViewItem Content="{Binding [Nav.Home], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon Home24}"
                                        TargetPageType="{x:Type pages:HomePage}"/>
@@ -32,9 +36,20 @@
                                        TargetPageType="{x:Type pages:TranslationPage}"/>
                 <ui:NavigationViewItem Content="{Binding [Nav.Profile], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon Games24}"
                                        TargetPageType="{x:Type pages:GameProfilePage}"/>
-                <ui:NavigationViewItem Content="{Binding [Nav.Subtitles], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon ClosedCaption24}"
-                                       TargetPageType="{x:Type pages:SubtitlesPage}"/>
-                <ui:NavigationViewItem Content="{Binding [Nav.Overlay], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon Layer24}"
+                <ui:NavigationViewItem x:Name="SubtitlesGroup" Content="{Binding [Nav.Subtitles], Source={x:Static l:Loc.Instance}}"
+                                       Icon="{ui:SymbolIcon ClosedCaption24}" IsExpanded="True">
+                    <ui:NavigationViewItem.MenuItems>
+                        <ui:NavigationViewItem Content="{Binding [Nav.Regions], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon SelectObject24}"
+                                               TargetPageType="{x:Type pages:RegionsPage}"/>
+                        <ui:NavigationViewItem Content="{Binding [Nav.Display], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon ShareScreenStart24}"
+                                               TargetPageType="{x:Type pages:DisplayPage}"/>
+                        <ui:NavigationViewItem Content="{Binding [Nav.Timing], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon Timer24}"
+                                               TargetPageType="{x:Type pages:TimingPage}"/>
+                        <ui:NavigationViewItem Content="{Binding [Nav.Reading], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon ScanText24}"
+                                               TargetPageType="{x:Type pages:SubtitlesPage}"/>
+                    </ui:NavigationViewItem.MenuItems>
+                </ui:NavigationViewItem>
+                <ui:NavigationViewItem Content="{Binding [Nav.Overlay], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon PaintBrush24}"
                                        TargetPageType="{x:Type pages:OverlayPage}"/>
                 <ui:NavigationViewItem Content="{Binding [Nav.Hotkeys], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon Keyboard24}"
                                        TargetPageType="{x:Type pages:HotkeysPage}"/>
@@ -42,9 +57,11 @@
                                        TargetPageType="{x:Type pages:NotificationsPage}"/>
                 <ui:NavigationViewItem Content="{Binding [Nav.Storage], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon Database24}"
                                        TargetPageType="{x:Type pages:StoragePage}"/>
+            </ui:NavigationView.MenuItems>
+            <ui:NavigationView.FooterMenuItems>
                 <ui:NavigationViewItem Content="{Binding [Nav.General], Source={x:Static l:Loc.Instance}}" Icon="{ui:SymbolIcon Info24}"
                                        TargetPageType="{x:Type pages:GeneralPage}"/>
-            </ui:NavigationView.MenuItems>
+            </ui:NavigationView.FooterMenuItems>
             <ui:NavigationView.ContentOverlay>
                 <Grid>
                     <ui:SnackbarPresenter x:Name="Snackbars" VerticalAlignment="Bottom"/>

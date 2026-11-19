@@ -111,6 +111,13 @@ internal sealed class SubtitleBoard
     /// <summary>The box was hidden: the lines so far stay in the history only.</summary>
     public void CloseWindow() => _windowStart = _entries.Count;
 
+    /// <summary>Forgets every line of the session: the box and the history start empty.</summary>
+    public void Clear()
+    {
+        _entries.Clear();
+        _windowStart = 0;
+    }
+
     /// <summary>The latest lines of the current conversation, oldest first.</summary>
     /// <param name="withOriginal">Each translated line carries the text it was made from (the overlay shows it under the translation).</param>
     public IReadOnlyList<SubtitleLineView> Visible(int lines, bool withOriginal = false)

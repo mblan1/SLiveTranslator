@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System;
 using System.Linq;
 using System.Runtime.ExceptionServices;
@@ -46,10 +47,14 @@ public class OverlayHostTests
 
     static DRect Region => new(Forms.Screen.PrimaryScreen!.Bounds.Left + 400, Forms.Screen.PrimaryScreen.Bounds.Bottom - 300, 800, 100);
 
+    /// <summary>The line TextBlocks of the subtitle box: in the box's panel, inside the host that carries the outline.</summary>
+    internal static IEnumerable<TextBlock> SubtitleTextBlocks(System.Windows.Window window) =>
+        ((StackPanel)((Border)((StackPanel)((Border)window.Content).Child).Children[0]).Child).Children.OfType<TextBlock>();
+
     static TextBlock[] Lines(OverlayHost overlay)
     {
         var window = overlay.Windows.Single(w => w.Name == "subtitles").Window;
-        return ((StackPanel)((Border)window.Content).Child).Children.OfType<TextBlock>().ToArray();
+        return SubtitleTextBlocks(window).ToArray();
     }
 
     [Fact]

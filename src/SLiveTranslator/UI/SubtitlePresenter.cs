@@ -14,8 +14,6 @@ namespace SLiveTranslator.UI;
 /// </summary>
 public sealed class SubtitlePresenter : ISubtitleSink
 {
-    static readonly TimeSpan Linger = TimeSpan.FromSeconds(6);
-
     readonly Dispatcher _ui;
     readonly OverlayHost _overlay;
     readonly Func<DRect> _region;
@@ -26,10 +24,13 @@ public sealed class SubtitlePresenter : ISubtitleSink
     readonly Action<bool> _onPaused;
     readonly SubtitleBoard _board = new();
     readonly DispatcherTimer _linger;
+    readonly TimeSpan? _lingerOverride;
     bool _live; // the game shows a subtitle right now
+    int _newestId = -1;
+    DateTime _newestSince = DateTime.UtcNow; // when the newest line first showed, for the shortest time on screen
 
-    /// <param name="look">The overlay settings in use: font size, lines, opacity, position, original text, history length.</param>
-    /// <param name="linger">How long the last lines stay after the game hides them (tests shorten it).</param>
+    /// <param name="look">The overlay settings in use: look, place, timing (see <see cref="SubtitleTiming"/>), history length.</param>
+    /// <param name="linger">How long the last lines stay after the game hides them, instead of the timing settings (tests shorten it).</param>
     public SubtitlePresenter(Dispatcher ui, OverlayHost overlay, Func<DRect> region, Func<OverlaySettings> look,
         Func<string> historyHotkey, Action<string> onError, Action<string> onNotice, Action<bool> onPaused, TimeSpan? linger = null)
     {
@@ -41,19 +42,15 @@ public sealed class SubtitlePresenter : ISubtitleSink
         _onError = onError;
         _onNotice = onNotice;
         _onPaused = onPaused;
-        _linger = new DispatcherTimer(DispatcherPriority.Normal, ui) { Interval = linger ?? Linger };
-        _linger.Tick += (_, _) =>
-        {
-            _linger.Stop();
-            _board.CloseWindow();
-            _overlay.HideSubtitle();
-        };
+        _lingerOverride = linger;
+        _linger = new DispatcherTimer(DispatcherPriority.Normal, ui) { Interval = linger ?? TimeSpan.FromSeconds(6) };
+        _linger.Tick += (_, _) => LingerOver();
     }
 
     public bool HistoryVisible { get; private set; }
     public int Count => _board.Count;
 
-    int VisibleLines => Math.Clamp(_look().MaxLines, 1, 5);
+    int VisibleLines => SubtitleTiming.VisibleLines(_look());
 
     int HistoryLines => Math.Clamp(_look().HistoryLines, 1, 100);
 
@@ -69,6 +66,19 @@ public sealed class SubtitlePresenter : ISubtitleSink
         _live = false;
         _board.CloseWindow();
         _overlay.HideSubtitle();
+    });
+
+    /// <summary>
+    /// Takes the lines off the screen and keeps reading: the next line shows as usual (Clear with subtitles kept on).
+    /// </summary>
+    /// <param name="history">Empties the dialog history too.</param>
+    public void ClearText(bool history) => _ui.Invoke(() =>
+    {
+        _linger.Stop();
+        _board.CloseWindow();
+        if (history) _board.Clear();
+        _overlay.HideSubtitle();
+        if (HistoryVisible) RenderHistory();
     });
 
     public bool ToggleHistory()
@@ -112,8 +122,14 @@ public sealed class SubtitlePresenter : ISubtitleSink
     public void LineDetected(int id, string original, bool lowConfidence) => _ui.BeginInvoke(() =>
     {
         _board.Detected(id, original, lowConfidence, Languages.Src, Languages.Tgt);
+        if (id != _newestId)
+        {
+            _newestId = id;
+            _newestSince = DateTime.UtcNow;
+        }
         _live = true;
         _linger.Stop();
+        _overlay.StopSubtitleCountdown();
         Render();
     });
 
@@ -145,10 +161,33 @@ public sealed class SubtitlePresenter : ISubtitleSink
 
     // ---- rendering ----
 
+    /// <summary>
+    /// The game hid its subtitle: the lines stay for as long as the timing settings say (see
+    /// <see cref="SubtitleTiming.Stay"/>), with the time-left bar running, then fade out. Until the next line, they stay.
+    /// </summary>
     void RestartLinger()
     {
         _linger.Stop();
+        _overlay.StopSubtitleCountdown();
+        var look = _look();
+        var visible = _board.Visible(1);
+        var stay = _lingerOverride ?? SubtitleTiming.Stay(look, visible.Count > 0 ? visible[^1].Text : "", DateTime.UtcNow - _newestSince);
+        if (stay is not { } time) return;
+        if (time <= TimeSpan.Zero)
+        {
+            LingerOver();
+            return;
+        }
+        _linger.Interval = time;
         _linger.Start();
+        if (look.TimeLeftBar && _lingerOverride is null) _overlay.StartSubtitleCountdown(time);
+    }
+
+    void LingerOver()
+    {
+        _linger.Stop();
+        _board.CloseWindow();
+        _overlay.HideSubtitle(_lingerOverride is null ? SubtitleTiming.Fade(_look().FadeOutMs) : TimeSpan.Zero);
     }
 
     void Render()

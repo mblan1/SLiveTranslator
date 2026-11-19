@@ -53,7 +53,25 @@ public interface ISettingsHost
     /// <summary>Whether the action's hotkey is registered; null before hotkeys were registered.</summary>
     HotkeyResult? HotkeyState(HotkeyAction action);
 
+    /// <summary>The read region and where the translation goes, picked on the screen (both steps).</summary>
     void SelectRegion();
+
+    /// <summary>The picker with only some of its steps (see <see cref="RegionPickMode"/>).</summary>
+    void SelectRegions(RegionPickMode mode) => SelectRegion();
+
+    /// <summary>What the OCR reads in the region now (the Regions page's test); null when it cannot read.</summary>
+    Task<ReadPreview?> TestReadingAsync(RegionSettings region, CancellationToken ct) => Task.FromResult<ReadPreview?>(null);
+
+    /// <summary>Clear, as its hotkey does (see <see cref="OverlaySettings.Clear"/>).</summary>
+    void ClearOverlay()
+    {
+    }
+
+    /// <summary>Private overlay and Shared on screen, as its hotkey switches them: saved at once.</summary>
+    void SwitchDisplayMode()
+    {
+    }
+
     void TranslateScreen();
     void ToggleHistory();
 

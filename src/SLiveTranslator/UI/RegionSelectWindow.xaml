@@ -3,15 +3,221 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:l="clr-namespace:SLiveTranslator.UI"
         Title="{Binding [Region.Title], Source={x:Static l:Loc.Instance}}"
-        WindowStyle="None" AllowsTransparency="True" Background="#50000000"
+        WindowStyle="None" AllowsTransparency="True" Background="#01000000"
         Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize" Cursor="Cross"
         WindowStartupLocation="Manual" Left="0" Top="0" Width="320" Height="120"
-        KeyDown="OnKeyDown" MouseDown="OnMouseDown" MouseMove="OnMouseMove" MouseUp="OnMouseUp">
+        FontFamily="Segoe UI" FontSize="14" Foreground="White"
+        PreviewKeyDown="OnKeyDown" MouseLeftButtonDown="OnMouseDown" MouseMove="OnMouseMove" MouseLeftButtonUp="OnMouseUp">
+    <!-- A plain window over the game: these styles come first, so WPF-UI's (merged once the main window opened) never reach it. -->
+    <Window.Resources>
+        <SolidColorBrush x:Key="Accent" Color="#60CDFF"/>
+        <SolidColorBrush x:Key="Amber" Color="#FFB547"/>
+        <SolidColorBrush x:Key="Panel" Color="#F7282828"/>
+        <SolidColorBrush x:Key="PanelEdge" Color="#4A4A4A"/>
+        <SolidColorBrush x:Key="Dim2" Color="#B8B8B8"/>
+
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <Style TargetType="Button">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="#363636"/>
+            <Setter Property="BorderBrush" Value="#4C4C4C"/>
+            <Setter Property="Padding" Value="14,7"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="4" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="Primary" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Background" Value="{StaticResource Accent}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource Accent}"/>
+            <Setter Property="Foreground" Value="Black"/>
+        </Style>
+
+        <Style TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="12,6"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="3" Padding="{TemplateBinding Padding}"
+                                BorderThickness="1" BorderBrush="Transparent">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#3A3A3A"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="#1D3846"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="#60CDFF"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Bd" Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- A colour swatch: its Background is the colour, a ring shows the one picked. -->
+        <Style x:Key="Swatch" TargetType="ToggleButton">
+            <Setter Property="Width" Value="32"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Margin" Value="0,0,8,0"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Ring" CornerRadius="8" BorderThickness="2" BorderBrush="Transparent" Padding="2">
+                            <Border Background="{TemplateBinding Background}" CornerRadius="5" BorderThickness="1" BorderBrush="#50FFFFFF"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Ring" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Ring" Property="BorderBrush" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <DrawingBrush x:Key="Checker" TileMode="Tile" Viewport="0,0,10,10" ViewportUnits="Absolute">
+            <DrawingBrush.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="#D6D6D6" Geometry="M0,0 H2 V2 H0Z"/>
+                    <GeometryDrawing Brush="#9A9A9A" Geometry="M0,0 H1 V1 H0Z M1,1 H2 V2 H1Z"/>
+                </DrawingGroup>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
+    </Window.Resources>
+
     <Canvas x:Name="Root">
-        <Border Canvas.Left="24" Canvas.Top="24" Background="#C0101418" CornerRadius="8" Padding="14,10">
-            <TextBlock Foreground="White" FontSize="16" FontFamily="Segoe UI"
-                       Text="{Binding [Region.Hint], Source={x:Static l:Loc.Instance}}"/>
+        <!-- Everything but the box being drawn is dimmed. -->
+        <Path x:Name="Dim" Fill="#94000000" IsHitTestVisible="False"/>
+
+        <!-- Step 2: the read region from step 1, kept as it is. -->
+        <Rectangle x:Name="ReadBox" Stroke="{StaticResource Accent}" StrokeThickness="2" StrokeDashArray="4 3" IsHitTestVisible="False" Visibility="Collapsed"/>
+        <Border x:Name="ReadTag" Background="{StaticResource Accent}" CornerRadius="4" Padding="8,3" IsHitTestVisible="False" Visibility="Collapsed">
+            <TextBlock Foreground="Black" FontSize="12" FontWeight="Bold" Text="{Binding [Region.ReadTag], Source={x:Static l:Loc.Instance}}"/>
         </Border>
-        <Rectangle x:Name="Selection" Stroke="#FF4FC3F7" StrokeThickness="2" Fill="#304FC3F7" Visibility="Collapsed"/>
+
+        <!-- The box being drawn, with its handles; in step 2 a preview of the translation inside. -->
+        <Grid x:Name="Selection" Visibility="Collapsed" IsHitTestVisible="False">
+            <Border x:Name="SelectionFill" CornerRadius="2">
+                <StackPanel x:Name="PreviewHost" VerticalAlignment="Center" Margin="10,6" Visibility="Collapsed">
+                    <TextBlock x:Name="PreviewText" TextWrapping="Wrap" TextAlignment="Center" FontWeight="SemiBold" Foreground="White"/>
+                </StackPanel>
+            </Border>
+            <Rectangle x:Name="SelectionEdge" StrokeThickness="2" Stroke="{StaticResource Accent}"/>
+            <Canvas x:Name="Handles"/>
+        </Grid>
+
+        <Border x:Name="SizeTag" CornerRadius="4" Padding="8,3" Background="{StaticResource Accent}" IsHitTestVisible="False" Visibility="Collapsed">
+            <TextBlock x:Name="SizeText" Foreground="Black" FontSize="12" FontWeight="Bold"/>
+        </Border>
+
+        <Border x:Name="StatusChip" CornerRadius="4" Padding="10,5" Background="#F2202020" BorderBrush="#454545" BorderThickness="1"
+                IsHitTestVisible="False" Visibility="Collapsed">
+            <StackPanel Orientation="Horizontal">
+                <Ellipse x:Name="StatusDot" Width="9" Height="9" Margin="0,0,8,0" Fill="#6CCB5F"/>
+                <TextBlock x:Name="StatusText" FontSize="13" TextWrapping="Wrap" MaxWidth="560"/>
+            </StackPanel>
+        </Border>
+
+        <!-- Step 2: the box behind the translation. -->
+        <Border x:Name="BackgroundPanel" Width="268" Background="{StaticResource Panel}" BorderBrush="{StaticResource PanelEdge}" BorderThickness="1"
+                CornerRadius="8" Padding="16,14" Visibility="Collapsed" MouseLeftButtonDown="OnPanelMouseDown" Cursor="Arrow">
+            <StackPanel>
+                <TextBlock FontWeight="SemiBold" Text="{Binding [Region.Background], Source={x:Static l:Loc.Instance}}"/>
+                <TextBlock x:Name="BackgroundName" Margin="0,2,0,10" FontSize="12" Foreground="{StaticResource Dim2}"/>
+                <WrapPanel x:Name="Swatches"/>
+                <TextBlock Margin="0,12,0,6" FontSize="13" Text="{Binding [Region.Opacity], Source={x:Static l:Loc.Instance}}"/>
+                <StackPanel x:Name="Opacities" Orientation="Horizontal"/>
+                <Border Height="1" Background="#444444" Margin="0,12"/>
+                <ToggleButton x:Name="OutlineToggle" HorizontalAlignment="Left" Padding="10,6" Checked="OnOutlineChanged" Unchecked="OnOutlineChanged"
+                              Content="{Binding [Region.Outline], Source={x:Static l:Loc.Instance}}"/>
+                <TextBlock Margin="0,6,0,0" FontSize="12" TextWrapping="Wrap" Foreground="{StaticResource Dim2}"
+                           Text="{Binding [Region.OutlineHint], Source={x:Static l:Loc.Instance}}"/>
+            </StackPanel>
+        </Border>
+
+        <Border x:Name="KeysBox" Background="#E6202020" CornerRadius="4" Padding="12,5" IsHitTestVisible="False">
+            <TextBlock x:Name="KeysText" Foreground="#D8D8D8" FontSize="12" Text="{Binding [Region.Keys], Source={x:Static l:Loc.Instance}}"/>
+        </Border>
+
+        <Border x:Name="Toolbar" Background="{StaticResource Panel}" BorderBrush="{StaticResource PanelEdge}" BorderThickness="1" CornerRadius="8"
+                Padding="18,12,14,12" MouseLeftButtonDown="OnPanelMouseDown" Cursor="Arrow">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="24" ShadowDepth="6" Opacity="0.45" Color="Black"/>
+            </Border.Effect>
+            <StackPanel>
+                <WrapPanel VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Margin="0,4,20,4" VerticalAlignment="Center">
+                        <Border x:Name="Step1Dot" Width="24" Height="24" CornerRadius="12" Background="{StaticResource Accent}">
+                            <TextBlock x:Name="Step1Mark" Text="1" Foreground="Black" FontSize="13" FontWeight="SemiBold" HorizontalAlignment="Center"/>
+                        </Border>
+                        <TextBlock x:Name="Step1Label" Margin="8,0,0,0" FontWeight="SemiBold" Text="{Binding [Region.StepRead], Source={x:Static l:Loc.Instance}}"/>
+                        <Border Width="28" Height="1" Background="#5A5A5A" Margin="10,0"/>
+                        <Border x:Name="Step2Dot" Width="24" Height="24" CornerRadius="12" BorderThickness="1" BorderBrush="#7A7A7A">
+                            <TextBlock x:Name="Step2Mark" Text="2" FontSize="13" HorizontalAlignment="Center"/>
+                        </Border>
+                        <TextBlock x:Name="Step2Label" Margin="8,0,0,0" Foreground="#B0B0B0" Text="{Binding [Region.StepDisplay], Source={x:Static l:Loc.Instance}}"/>
+                    </StackPanel>
+                    <StackPanel Margin="0,4,20,4" VerticalAlignment="Center" MaxWidth="420">
+                        <TextBlock x:Name="Instruction" TextWrapping="Wrap"/>
+                        <TextBlock x:Name="InstructionHint" FontSize="12" Foreground="#B0B0B0" TextWrapping="Wrap"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,4,0,4" VerticalAlignment="Center">
+                        <Button x:Name="RedoButton" Margin="0,0,8,0" Click="OnRedo" Content="{Binding [Region.Redo], Source={x:Static l:Loc.Instance}}"/>
+                        <Button x:Name="BackButton" Margin="0,0,8,0" Click="OnBack" Visibility="Collapsed" Content="{Binding [Region.Back], Source={x:Static l:Loc.Instance}}"/>
+                        <Button Margin="0,0,8,0" Click="OnCancel" Content="{Binding [Region.Cancel], Source={x:Static l:Loc.Instance}}"/>
+                        <Button x:Name="NextButton" Style="{StaticResource Primary}" Click="OnNext"/>
+                    </StackPanel>
+                </WrapPanel>
+                <Border x:Name="PresetRow" BorderThickness="0,1,0,0" BorderBrush="#444444" Margin="0,10,0,0" Padding="0,10,0,0" Visibility="Collapsed">
+                    <WrapPanel>
+                        <TextBlock Margin="0,0,12,0" FontSize="13" Foreground="#C8C8C8" Text="{Binding [Region.SnapTo], Source={x:Static l:Loc.Instance}}"/>
+                        <Border Background="#2C2C2C" BorderBrush="#4A4A4A" BorderThickness="1" CornerRadius="4" Padding="2" Margin="0,0,14,0">
+                            <StackPanel x:Name="Presets" Orientation="Horizontal"/>
+                        </Border>
+                        <Border x:Name="ModeChip" CornerRadius="14" Padding="12,5" Background="#1D3846" BorderBrush="#2D5A73" BorderThickness="1">
+                            <TextBlock x:Name="ModeText" FontSize="13"/>
+                        </Border>
+                    </WrapPanel>
+                </Border>
+            </StackPanel>
+        </Border>
     </Canvas>
 </Window>

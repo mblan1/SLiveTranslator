@@ -30,7 +30,7 @@ namespace SLiveTranslator;
 
 public partial class App : Application, ISettingsHost
 {
-    /// <summary>How long "Preview on screen" shows its sample subtitle.</summary>
+    /// <summary>How long "Preview on screen" keeps its sample after the "game" hid it, when lines stay until the next one.</summary>
     static readonly TimeSpan PreviewTime = TimeSpan.FromSeconds(5);
 
     /// <summary>How long the minimized main window gets to hand the foreground to the window behind it.</summary>
@@ -116,7 +116,7 @@ public partial class App : Application, ISettingsHost
 
         problems.AddRange(BuildServices());
         problems.AddRange(_profiles.Problems);
-        _overlay = new OverlayHost();
+        _overlay = new OverlayHost { Shared = SharedWindows.For(_settings.Overlay) };
         _providers.ServiceSwitched += OnServiceSwitched;
         _myMemoryUsage.Counted += OnMyMemoryCounted;
 
@@ -296,7 +296,10 @@ public partial class App : Application, ISettingsHost
     {
         if (_trayMenu is null) return;
         var items = TrayMenu.Build(new TrayState(HomeViewModel.ProviderLineOf(_settings.Translation, UiProviders()), _subtitles?.IsRunning == true,
-            _presenter?.HistoryVisible == true, _settings.Notifications.Muted, _settings.Hotkeys, TrayProviders(), _settings.Translation.Provider));
+            _presenter?.HistoryVisible == true, _settings.Notifications.Muted, _settings.Hotkeys, TrayProviders(), _settings.Translation.Provider)
+        {
+            Shared = _settings.Overlay.DisplayMode == DisplayMode.Shared,
+        });
         foreach (var old in _trayMenu.Items.Cast<Forms.ToolStripItem>().ToList()) old.Dispose();
         _trayMenu.Items.Clear();
         foreach (var item in items) _trayMenu.Items.Add(MenuItem(item));
@@ -323,6 +326,7 @@ public partial class App : Application, ISettingsHost
             case TrayCommand.History: ToggleHistory(); break;
             case TrayCommand.SelectRegion: SelectRegion(); break;
             case TrayCommand.Clear: ClearOverlay(); break;
+            case TrayCommand.DisplayMode: SwitchDisplayMode(); break;
             case TrayCommand.Provider: PickProvider(item.Value!); break;
             case TrayCommand.Mute: ToggleMute(); break;
             case TrayCommand.Open: ShowMainWindow(); break;
@@ -386,6 +390,7 @@ public partial class App : Application, ISettingsHost
             [HotkeyAction.SelectRegion] = OnHotkey(HotkeyAction.SelectRegion, () => SelectRegion()),
             [HotkeyAction.Clear] = OnHotkey(HotkeyAction.Clear, ClearOverlay),
             [HotkeyAction.History] = OnHotkey(HotkeyAction.History, ToggleHistory),
+            [HotkeyAction.SwitchDisplayMode] = OnHotkey(HotkeyAction.SwitchDisplayMode, SwitchDisplayMode),
         });
         if (HotkeyText.Problems(results, _settings.Hotkeys) is not { } problem) return null;
         Log.Warn("hotkeys: " + string.Join(", ", results.Select(r => $"{r.Key}={_settings.Hotkeys[r.Key]}:{r.Value}")));
@@ -535,12 +540,16 @@ public partial class App : Application, ISettingsHost
         _presenter.ToggleHistory();
     }
 
-    DRect? SelectRegion()
+    /// <summary>The read region and where the translation goes, picked on the screen (see <see cref="RegionSelectWindow"/>).</summary>
+    /// <returns>The read region, or null when the pick was cancelled.</returns>
+    DRect? SelectRegion(RegionPickMode mode = RegionPickMode.Both)
     {
         bool wasRunning = _subtitles?.IsRunning == true;
         StopSubtitles();
-        var screen = Forms.Screen.FromPoint(Forms.Cursor.Position);
-        var dialog = new RegionSelectWindow(screen);
+        var read = _settings.Subtitles.Region?.ToRectangle();
+        // Only the display box: the picker opens on the read region's monitor; else on the one under the mouse.
+        var screen = mode == RegionPickMode.DisplayOnly && read is { } r ? Forms.Screen.FromRectangle(r) : Forms.Screen.FromPoint(Forms.Cursor.Position);
+        var dialog = new RegionSelectWindow(screen, mode, read, SettingsStore.Clone(_settings).Overlay, _ocr is null ? null : ReadPreviewAsync);
         // Started from the main window, which would cover the game where the subtitles are: it steps aside while the
         // user drags and comes back after. Started in the game (the hotkey) it is left as it is: bringing it back
         // would take the focus from the game, and the subtitles would start paused.
@@ -553,28 +562,100 @@ public partial class App : Application, ISettingsHost
             main.WindowState = state;
             main.Activate();
         }
-        if (!picked || dialog.Result is not { } rect)
+        if (!picked || dialog.Pick is not { } pick)
         {
             if (wasRunning) StartSubtitles(restart: true);
             return null;
         }
+        var rect = pick.Read;
         _settings.Subtitles.Region = RegionSettings.From(rect);
+        if (pick.Display is { } display)
+        {
+            var look = _settings.Overlay;
+            look.Position = display.Position;
+            if (display.Custom is { } custom) look.DisplayRegion = RegionSettings.From(custom);
+            look.BackgroundColor = display.BackgroundColor;
+            look.BackgroundOpacity = Math.Round(display.BackgroundOpacity, 2);
+            look.TextOutline = display.TextOutline;
+        }
         TrySaveSettings();
         SettingsChanged?.Invoke(this, EventArgs.Empty);
-        if (!WarnIfLargeRegion(rect)) _notifier.Feedback(NoticeCategory.Status, Loc.Instance["Notice.RegionSaved"], rect);
+        _presenter?.Restyle();
+        if (!WarnIfLargeRegion(rect))
+            _notifier.Feedback(NoticeCategory.Status, Loc.Instance[pick.Display is null ? "Notice.RegionSaved" : "Notice.RegionsSaved"], rect);
         if (wasRunning) StartSubtitles(restart: true);
         return rect;
     }
 
+    /// <summary>The picker's live check and the Regions page's test: what the OCR reads in a box of the screen now.</summary>
+    async Task<ReadPreview?> ReadPreviewAsync(DRect boxPx, CancellationToken ct)
+    {
+        if (_ocr is not { } ocr || boxPx.Width < 8 || boxPx.Height < 8) return null;
+        using var frame = await Task.Run(() => ScreenCapture.Capture(boxPx), ct);
+        var lines = await ocr.RecognizeAsync(frame, ct);
+        var read = lines.Where(l => l.Text.Trim().Length > 0).ToList();
+        return new ReadPreview(read.Sum(l => Math.Max(1, l.LineCount)), LanguageName(ocr.LanguageTag), string.Join(" ", read.Select(l => l.Text.Trim())));
+    }
+
+    /// <summary>"English" for "en-US", in the language's own name.</summary>
+    static string LanguageName(string tag)
+    {
+        try
+        {
+            var culture = System.Globalization.CultureInfo.GetCultureInfo(LangCodes.FromOcrTag(tag));
+            string name = culture.NativeName;
+            return name.Length > 0 ? char.ToUpper(name[0], culture) + name[1..] : tag;
+        }
+        catch (System.Globalization.CultureNotFoundException)
+        {
+            return tag;
+        }
+    }
+
+    /// <summary>
+    /// Private overlay and Shared on screen, switched by its hotkey and the tray: saved at once, the overlay windows
+    /// follow, and a notice says which mode is on.
+    /// </summary>
+    void SwitchDisplayMode()
+    {
+        var look = _settings.Overlay;
+        look.DisplayMode = look.DisplayMode == DisplayMode.Shared ? DisplayMode.Private : DisplayMode.Shared;
+        TrySaveSettings();
+        ApplyDisplayMode();
+        SettingsChanged?.Invoke(this, EventArgs.Empty);
+        StateChanged?.Invoke(this, EventArgs.Empty);
+        bool shared = look.DisplayMode == DisplayMode.Shared;
+        string text = Loc.Instance[shared ? "Notice.ModeShared" : "Notice.ModePrivate"];
+        if (shared && look.Share.Subtitles && _settings.Subtitles.Region is { } region
+            && SubtitlePlacement.Covers(look.Position, look.DisplayRegion?.ToRectangle(), region.ToRectangle()))
+            text += "\n" + Loc.Instance["Notice.ModeSharedMoved"];
+        _notifier.Feedback(NoticeCategory.Status, text, _subtitles?.Region ?? GameArea(), shared ? StatusKind.On : StatusKind.Info);
+    }
+
+    /// <summary>The overlay windows screen sharing sees, and the lines placed again for it.</summary>
+    void ApplyDisplayMode()
+    {
+        if (_overlay is not null) _overlay.Shared = SharedWindows.For(_settings.Overlay);
+        _presenter?.Restyle();
+    }
+
+    /// <summary>
+    /// Takes the labels, the lines and the history panel off the screen. Subtitles keep running, unless the Timing page
+    /// says Clear turns them off too (how it worked before).
+    /// </summary>
     void ClearOverlay()
     {
         _screenCts?.Cancel();
         _clearTimer?.Stop();
         _overlay?.ClearLabels();
         bool wasRunning = _subtitles?.IsRunning == true;
-        StopSubtitles();
+        var look = _settings.Overlay;
+        bool stop = look.Clear == ClearMode.StopSubtitles;
+        if (stop) StopSubtitles();
+        _presenter?.ClearText(look.ClearHistory);
         _presenter?.HideHistory();
-        _notifier.Feedback(NoticeCategory.Status, Loc.Instance[wasRunning ? "Notice.ClearedSubtitlesOff" : "Notice.Cleared"], GameArea(), StatusKind.Off);
+        string key = !wasRunning ? "Notice.Cleared" : stop ? "Notice.ClearedSubtitlesOff" : "Notice.ClearedSubtitlesOn";
+        _notifier.Feedback(NoticeCategory.Status, Loc.Instance[key], GameArea(), wasRunning && !stop ? StatusKind.On : StatusKind.Off);
     }
 
     /// <param name="welcome">Opens the first-run wizard over it.</param>
@@ -605,7 +686,7 @@ public partial class App : Application, ISettingsHost
     {
         var vm = new SettingsViewModel(this);
         if (welcome) vm.Welcome.Open();
-        return UI.MainWindow.Open(vm, _settings.General.Theme);
+        return UI.MainWindow.Open(vm, _settings.General.Theme, _settings.General.HideMainWindowFromCapture);
     }
 
     /// <summary>Exit from the tray: unsaved edits in the main window are dropped without asking (WPF closes it on shutdown).</summary>
@@ -620,6 +701,9 @@ public partial class App : Application, ISettingsHost
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     static void ApplyTheme(Window window, AppTheme theme) => ((UI.MainWindow)window).ApplyTheme(theme);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    static void ApplyMainWindowCapture(Window window, bool hide) => ((UI.MainWindow)window).HideFromCapture = hide;
 
     /// <summary>
     /// An error that arose by itself (a subtitle line, an unexpected failure), on the in-game overlay: Windows suppresses
@@ -665,7 +749,8 @@ public partial class App : Application, ISettingsHost
         if (redo.RebuildOcr) problems.AddRange(BuildOcr());
         if (redo.RebuildProviders) problems.AddRange(ApplyProviders());
         if (redo.RegisterHotkeys && RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
-        if (redo.Restyle) _presenter?.Restyle();
+        if (redo.Restyle) ApplyDisplayMode();
+        if (_mainWindow is not null) ApplyMainWindowCapture(_mainWindow, _settings.General.HideMainWindowFromCapture);
         if (changes.HasFlag(SettingsChange.Notifications) && !_settings.Notifications.LiveBadge) _notifier.HideLiveBadge();
         if (redo.Theme && _mainWindow is not null) ApplyTheme(_mainWindow, _settings.General.Theme);
         if (redo.RestartSubtitles) StartSubtitles(restart: true);
@@ -708,6 +793,25 @@ public partial class App : Application, ISettingsHost
 
     void ISettingsHost.SelectRegion() => SelectRegion();
 
+    void ISettingsHost.SelectRegions(RegionPickMode mode) => SelectRegion(mode);
+
+    async Task<ReadPreview?> ISettingsHost.TestReadingAsync(RegionSettings region, CancellationToken ct)
+    {
+        try
+        {
+            return await ReadPreviewAsync(region.ToRectangle(), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Warn("test reading: " + ex.Message);
+            return null;
+        }
+    }
+
+    void ISettingsHost.ClearOverlay() => ClearOverlay();
+
+    void ISettingsHost.SwitchDisplayMode() => SwitchDisplayMode();
+
     /// <summary>
     /// The Home page's "Translate screen": the main window steps aside first, so what is read is the window behind it
     /// (the game), as with the hotkey, and not the screen behind the settings with the labels drawn over them.
@@ -724,28 +828,55 @@ public partial class App : Application, ISettingsHost
 
     void ISettingsHost.ToggleHistory() => ToggleHistory();
 
-    /// <summary>A sample subtitle in this look at the subtitle region (or where one would be), for a few seconds.</summary>
+    OverlaySettings? _previewLook;
+    bool _previewLingering;
+
+    /// <summary>
+    /// A sample subtitle in this look at the subtitle region (or where one would be), timed as the look says: the "game"
+    /// shows it for 3 seconds, then it stays (with the time-left bar) and fades out like a real line.
+    /// </summary>
     void ISettingsHost.PreviewOverlay(OverlaySettings look)
     {
         if (_overlay is null) return;
         var screen = Forms.Screen.PrimaryScreen!.Bounds;
         var region = _settings.Subtitles.Region?.ToRectangle()
                      ?? new DRect(screen.Left + screen.Width / 5, screen.Bottom - screen.Height / 4, screen.Width * 3 / 5, screen.Height / 12);
-        var lines = PreviewLines().TakeLast(Math.Clamp(look.MaxLines, 1, 5)).ToList();
+        var lines = PreviewLines().TakeLast(SubtitleTiming.VisibleLines(look)).ToList();
+        _overlay.HideSubtitle();
         _overlay.ShowSubtitleLines(lines, region, look.FontSize, SubtitleStyle.From(look));
+        _previewLook = look;
+        _previewLingering = false;
         if (_previewTimer is null)
         {
-            _previewTimer = new DispatcherTimer { Interval = PreviewTime };
-            _previewTimer.Tick += (_, _) =>
-            {
-                _previewTimer.Stop();
-                // The sample goes; running subtitles get their own lines back.
-                _overlay?.HideSubtitle();
-                if (_subtitles?.IsRunning == true) _presenter?.Restyle();
-            };
+            _previewTimer = new DispatcherTimer();
+            _previewTimer.Tick += (_, _) => PreviewStep();
         }
         _previewTimer.Stop();
+        _previewTimer.Interval = TimeSpan.FromSeconds(SubtitleTiming.SampleShowSeconds);
         _previewTimer.Start();
+    }
+
+    void PreviewStep()
+    {
+        if (_previewTimer is null || _previewLook is not { } look) return;
+        _previewTimer.Stop();
+        if (!_previewLingering)
+        {
+            // The "game" hid the line: it stays as long as a real one would (a few seconds when it stays until the next line).
+            _previewLingering = true;
+            var stay = SubtitleTiming.Stay(look, Loc.Instance["Overlay.Sample3"], TimeSpan.FromSeconds(SubtitleTiming.SampleShowSeconds)) ?? PreviewTime;
+            if (stay > TimeSpan.Zero)
+            {
+                if (look.TimeLeftBar && look.Stay != StayMode.UntilNext) _overlay?.StartSubtitleCountdown(stay);
+                _previewTimer.Interval = stay;
+                _previewTimer.Start();
+                return;
+            }
+        }
+        _previewLook = null;
+        // The sample goes; running subtitles get their own lines back.
+        if (_subtitles?.IsRunning == true) _presenter?.Restyle();
+        else _overlay?.HideSubtitle(SubtitleTiming.Fade(look.FadeOutMs));
     }
 
     /// <summary>Two earlier lines and the newest, each with the game's English under it when the look shows the original.</summary>

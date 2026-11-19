@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace SLiveTranslator.Models;
 
-public enum HotkeyAction { TranslateScreen, ToggleSubtitles, SelectRegion, Clear, History }
+public enum HotkeyAction { TranslateScreen, ToggleSubtitles, SelectRegion, Clear, History, SwitchDisplayMode }
 
 public sealed class HotkeySettings : SettingsSection
 {
@@ -13,6 +13,7 @@ public sealed class HotkeySettings : SettingsSection
         [HotkeyAction.SelectRegion] = "Ctrl+Shift+R",
         [HotkeyAction.Clear] = "Ctrl+Shift+X",
         [HotkeyAction.History] = "Ctrl+Shift+H",
+        [HotkeyAction.SwitchDisplayMode] = "Ctrl+Shift+P",
     };
 
     /// <summary>Gesture per action, e.g. "Ctrl+Shift+T".</summary>

@@ -40,7 +40,11 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
         Translation = new TranslationViewModel(this, host, delay);
         Profiles = new ProfileEditorViewModel(this, host.Profiles);
         Subtitles = new SubtitlesViewModel(this, host);
+        Regions = new RegionsViewModel(this, host);
+        Display = new DisplayViewModel(this);
+        Timing = new TimingViewModel(this, host);
         Overlay = new OverlayViewModel(this, host);
+        Home.Navigate = Navigate;
         Hotkeys = new HotkeysViewModel(this, host);
         Notifications = new NotificationsViewModel(this, host);
         Storage = new StorageViewModel(this, host);
@@ -70,7 +74,20 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
     public TranslationViewModel Translation { get; }
     public ProfileEditorViewModel Profiles { get; }
     public SubtitlesViewModel Subtitles { get; }
+    public RegionsViewModel Regions { get; }
+    public DisplayViewModel Display { get; }
+    public TimingViewModel Timing { get; }
     public OverlayViewModel Overlay { get; }
+
+    public const string RegionsPage = "Regions";
+    public const string DisplayPage = "Display";
+    public const string TimingPage = "Timing";
+    public const string AppearancePage = "Appearance";
+
+    /// <summary>A page asks the window to show another one (a page name above).</summary>
+    public event EventHandler<string>? NavigateRequested;
+
+    public void Navigate(string page) => NavigateRequested?.Invoke(this, page);
     public HotkeysViewModel Hotkeys { get; }
     public NotificationsViewModel Notifications { get; }
     public StorageViewModel Storage { get; }
@@ -183,6 +200,9 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
         Translation.Relocalize();
         Profiles.Reload();
         Subtitles.Relocalize();
+        Regions.Relocalize();
+        Display.Relocalize();
+        Timing.Relocalize();
         Overlay.Relocalize();
         Hotkeys.Relocalize();
         Notifications.Relocalize();
@@ -207,6 +227,9 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
         Translation.Reload(keepTyped);
         Profiles.Reload();
         Subtitles.Reload();
+        Regions.Reload();
+        Display.Reload();
+        Timing.Reload();
         Overlay.Reload();
         Hotkeys.Reload();
         Notifications.Reload();

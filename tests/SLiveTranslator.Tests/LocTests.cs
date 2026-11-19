@@ -206,8 +206,8 @@ public class LocTests
             try
             {
                 var window = new RegionSelectWindow(System.Windows.Forms.Screen.PrimaryScreen!);
-                var hint = (TextBlock)((Border)window.Root.Children[0]).Child;
-                Assert.Equal(Loc.Instance["Region.Hint"], hint.Text);
+                Assert.Equal(Loc.Instance["Region.StepRead"], window.Step1Label.Text);
+                Assert.Equal(Loc.Instance["Region.Keys"], window.KeysText.Text);
                 Assert.Equal(Loc.Instance["Region.Title"], window.Title);
                 window.Close();
             }

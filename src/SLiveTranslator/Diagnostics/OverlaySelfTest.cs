@@ -67,6 +67,7 @@ internal static class OverlaySelfTest
         var failures = new List<string>();
         Check(overlay, area, "shown", outDir, report, failures);
 
+        await CheckPickerAsync(subtitleRegion, outDir, report, failures);
         await CheckMainWindowAsync(outDir, report, failures);
         Check(overlay, area, "after the main window", null, report, failures);
 
@@ -76,6 +77,36 @@ internal static class OverlaySelfTest
         foreach (var line in report) Console.WriteLine(line);
         overlay.Close();
         return failures.Count == 0 ? 0 : 3;
+    }
+
+    /// <summary>
+    /// The region picker on the primary monitor, both steps, with a sample read region and a pretend live check: each
+    /// step is saved as a picture, and the picker must stay hidden from screen capture (its live check reads under it).
+    /// </summary>
+    static async Task CheckPickerAsync(DRect read, string outDir, List<string> report, List<string> failures)
+    {
+        var look = new OverlaySettings { DisplayMode = DisplayMode.Shared };
+        var picker = new RegionSelectWindow(Forms.Screen.PrimaryScreen!, RegionPickMode.Both, read, look,
+            (_, _) => Task.FromResult<ReadPreview?>(new ReadPreview(2, "English", "Welcome, traveller.")));
+        try
+        {
+            picker.Show();
+            await Task.Delay(900); // the live check waits for the box to settle
+            SaveRendering(picker, Path.Combine(outDir, "selftest_picker_1.png"));
+            picker.Confirm();
+            await Task.Delay(400);
+            SaveRendering(picker, Path.Combine(outDir, "selftest_picker_2.png"));
+            report.Add($"picker: visible={picker.IsVisible} pick={picker.Pick}");
+            if (picker.Pick is not null) failures.Add("the picker ended after step 1 instead of going on to the display region");
+        }
+        catch (Exception ex)
+        {
+            failures.Add("picker: " + ex.GetType().Name + ": " + ex.Message);
+        }
+        finally
+        {
+            picker.Close();
+        }
     }
 
     /// <summary>The main window on default settings (see <see cref="SelfTestHost"/>), every page shown once, then closed.</summary>
@@ -97,6 +128,7 @@ internal static class OverlaySelfTest
             var vm = new SettingsViewModel(new SelfTestHost(outDir));
             // A provider card on the Translation page, so its bindings are shown too (no key: nothing is checked).
             vm.Translation.SelectedProvider = vm.Translation.ProviderChoices.First(c => c.Value == ProviderIds.Claude);
+            var edited = vm.PendingChanges; // that edit is the self-test's own
             var main = MainWindow.Open(vm, AppTheme.System);
             await Task.Delay(800);
             bool themed = Wpf.Ui.UiApplication.Current.IsApplication && ReferenceEquals(Application.Current.MainWindow, main);
@@ -105,7 +137,8 @@ internal static class OverlaySelfTest
             if (!themed) failures.Add("WPF-UI's theme does not reach the main window (it is not the app's MainWindow, or the dictionaries came too late)");
             foreach (var page in new[]
                      {
-                         typeof(TranslationPage), typeof(GameProfilePage), typeof(SubtitlesPage), typeof(OverlayPage), typeof(HotkeysPage),
+                         typeof(TranslationPage), typeof(GameProfilePage), typeof(RegionsPage), typeof(DisplayPage), typeof(TimingPage),
+                         typeof(SubtitlesPage), typeof(OverlayPage), typeof(HotkeysPage),
                          typeof(NotificationsPage), typeof(StoragePage), typeof(GeneralPage), typeof(HistoryPage), typeof(HomePage),
                      })
             {
@@ -114,6 +147,7 @@ internal static class OverlaySelfTest
                 report.Add($"main window: page {page.Name} shown={shown}");
                 if (!shown) failures.Add($"the main window did not show the page {page.Name}");
                 SaveRendering(main, Path.Combine(outDir, $"selftest_main_{page.Name}.png"));
+                SavePageRendering(main, page, Path.Combine(outDir, $"selftest_page_{page.Name}.png"));
                 // A tab's content is made only when it is selected: each one is shown, so its bindings are checked too.
                 foreach (var tabs in VisualDescendants(main).OfType<TabControl>().ToList())
                 {
@@ -126,6 +160,8 @@ internal static class OverlaySelfTest
                     tabs.SelectedIndex = 0;
                 }
             }
+            // Showing a page must not change a setting (a box or slider that rounds the value it shows, say).
+            if (vm.PendingChanges != edited) failures.Add("showing the pages changed a setting: " + (vm.PendingChanges & ~edited));
             // Each theme switch repaints the app's MainWindow: it must land on the main window, never on an overlay.
             main.Show(Loc.Instance["Main.Saved"], "", MessageKind.Success); // the snackbar a save shows
             await Task.Delay(700);
@@ -175,6 +211,30 @@ internal static class OverlaySelfTest
     {
         var encoder = new PngBitmapEncoder();
         encoder.Frames.Add(BitmapFrame.Create(Render(window)));
+        using var file = File.Create(path);
+        encoder.Save(file);
+    }
+
+    /// <summary>
+    /// The whole page, also what is scrolled out of the window: its content is laid out at its full height inside the
+    /// page's scroll viewer, and is drawn here on the window's background.
+    /// </summary>
+    static void SavePageRendering(Window window, Type pageType, string path)
+    {
+        if (VisualDescendants(window).OfType<Page>().FirstOrDefault(p => p.GetType() == pageType) is not { Content: FrameworkElement content }
+            || content.ActualWidth < 1 || content.ActualHeight < 1) return;
+        double scale = VisualTreeHelper.GetDpi(window).DpiScaleX;
+        var size = new Size(content.ActualWidth, content.ActualHeight);
+        var drawing = new DrawingVisual();
+        using (var dc = drawing.RenderOpen())
+        {
+            dc.DrawRectangle(window.TryFindResource("ApplicationBackgroundBrush") as Brush ?? Brushes.Black, null, new Rect(size));
+            dc.DrawRectangle(new VisualBrush(content) { Stretch = Stretch.None, AlignmentX = AlignmentX.Left, AlignmentY = AlignmentY.Top }, null, new Rect(size));
+        }
+        var render = new RenderTargetBitmap((int)Math.Ceiling(size.Width * scale), (int)Math.Ceiling(size.Height * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+        render.Render(drawing);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(render));
         using var file = File.Create(path);
         encoder.Save(file);
     }

@@ -3,23 +3,17 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:l="clr-namespace:SLiveTranslator.UI"
-      Title="{Binding [Nav.Subtitles], Source={x:Static l:Loc.Instance}}">
+      Title="{Binding [Nav.Reading], Source={x:Static l:Loc.Instance}}">
     <Page.Resources>
         <ResourceDictionary Source="PageStyles.xaml"/>
     </Page.Resources>
     <StackPanel Margin="24,12,24,24">
-        <TextBlock Style="{StaticResource PageTitle}" Text="{Binding [Subtitles.Title], Source={x:Static l:Loc.Instance}}"/>
-
-        <ui:CardControl Icon="{ui:SymbolIcon SelectObject24}" Margin="0,0,0,8">
-            <ui:CardControl.Header>
-                <StackPanel>
-                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Subtitles.Region], Source={x:Static l:Loc.Instance}}"/>
-                    <TextBlock Style="{StaticResource Hint}" Text="{Binding RegionText}"/>
-                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Subtitles.RegionHint], Source={x:Static l:Loc.Instance}}"/>
-                </StackPanel>
-            </ui:CardControl.Header>
-            <ui:Button Content="{Binding [Subtitles.Select], Source={x:Static l:Loc.Instance}}" Command="{Binding SelectRegionCommand}"/>
-        </ui:CardControl>
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+            <TextBlock Style="{StaticResource PageTitle}" Margin="0" Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                       Text="{Binding [Nav.Subtitles], Source={x:Static l:Loc.Instance}}"/>
+            <ui:SymbolIcon Symbol="ChevronRight20" FontSize="18" Margin="10,4,10,0" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+            <TextBlock Style="{StaticResource PageTitle}" Margin="0" Text="{Binding [Nav.Reading], Source={x:Static l:Loc.Instance}}"/>
+        </StackPanel>
 
         <ui:CardControl Icon="{ui:SymbolIcon ArrowSync24}" Margin="0,0,0,8">
             <ui:CardControl.Header>

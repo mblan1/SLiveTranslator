@@ -55,13 +55,37 @@ public class ClickThroughWindow : Window
     /// <summary>Screen capture, and so the app's own OCR, does not see the window (Windows 10 2004 and later).</summary>
     public bool ExcludedFromCapture { get; private set; }
 
+    bool _shared;
+
+    /// <summary>
+    /// The window is part of the screen for screen sharing and recording (Shared on screen): capture, the app's own OCR
+    /// included, sees it. False (the default) hides it from capture.
+    /// </summary>
+    public bool Shared
+    {
+        get => _shared;
+        set
+        {
+            if (_shared == value) return;
+            _shared = value;
+            var hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd != IntPtr.Zero) ApplyCaptureAffinity(hwnd);
+        }
+    }
+
+    void ApplyCaptureAffinity(IntPtr hwnd)
+    {
+        bool ok = Native.SetWindowDisplayAffinity(hwnd, _shared ? Native.WDA_NONE : Native.WDA_EXCLUDEFROMCAPTURE);
+        ExcludedFromCapture = !_shared && ok;
+    }
+
     void MakeClickThrough()
     {
         var hwnd = new WindowInteropHelper(this).Handle;
-        long ex = Native.GetWindowLongPtrW(hwnd, Native.GWL_EXSTYLE).ToInt64();
+        long ex = Native.GetWindowLongPtr(hwnd, Native.GWL_EXSTYLE).ToInt64();
         ex |= Native.WS_EX_TRANSPARENT | Native.WS_EX_LAYERED | Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE;
-        Native.SetWindowLongPtrW(hwnd, Native.GWL_EXSTYLE, new IntPtr(ex));
-        ExcludedFromCapture = Native.SetWindowDisplayAffinity(hwnd, Native.WDA_EXCLUDEFROMCAPTURE);
+        Native.SetWindowLongPtr(hwnd, Native.GWL_EXSTYLE, new IntPtr(ex));
+        ApplyCaptureAffinity(hwnd);
         HwndSource.FromHwnd(hwnd)?.AddHook(AllowAnySize);
         // WPF took the minimum size from the first query, sent before the hook existed: a resize asks again.
         Native.SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 1, 1, Native.SWP_NOMOVE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);

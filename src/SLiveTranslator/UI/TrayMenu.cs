@@ -8,7 +8,7 @@ namespace SLiveTranslator.UI;
 
 public enum TrayCommand
 {
-    Separator, Status, Subtitles, TranslateScreen, History, SelectRegion, Clear, Providers, Provider, Mute, Open, OpenDataFolder, Exit,
+    Separator, Status, Subtitles, TranslateScreen, History, SelectRegion, Clear, DisplayMode, Providers, Provider, Mute, Open, OpenDataFolder, Exit,
 }
 
 /// <summary>One entry of the tray menu, as plain data: the app turns it into a menu item.</summary>
@@ -22,7 +22,11 @@ public sealed record TrayItem(TrayCommand Command, string Text = "", string Gest
 /// <param name="Providers">The providers to offer: the free services and the ones set up.</param>
 /// <param name="Provider">The selected provider id.</param>
 public sealed record TrayState(string ProviderLine, bool SubtitlesOn, bool HistoryVisible, bool Muted, HotkeySettings Hotkeys,
-    IReadOnlyList<Choice<string>> Providers, string Provider);
+    IReadOnlyList<Choice<string>> Providers, string Provider)
+{
+    /// <summary>The overlay is in Shared on screen mode (checked item), not Private overlay.</summary>
+    public bool Shared { get; init; }
+}
 
 /// <summary>
 /// The tray menu for the app's state, in its language: a status line, the actions with their hotkeys, the provider
@@ -47,6 +51,7 @@ public static class TrayMenu
             new(TrayCommand.History, loc["Tray.History"], Gesture(HotkeyAction.History), Checked: state.HistoryVisible),
             new(TrayCommand.SelectRegion, loc["Tray.SelectRegion"], Gesture(HotkeyAction.SelectRegion)),
             new(TrayCommand.Clear, loc["Tray.Clear"], Gesture(HotkeyAction.Clear)),
+            new(TrayCommand.DisplayMode, loc["Tray.Shared"], Gesture(HotkeyAction.SwitchDisplayMode), Checked: state.Shared),
             separator,
             new(TrayCommand.Providers, loc["Tray.Provider"], Items: providers),
             new(TrayCommand.Mute, loc["Tray.Mute"], Checked: state.Muted),

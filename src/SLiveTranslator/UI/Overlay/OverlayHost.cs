@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using SLiveTranslator.Models;
@@ -36,6 +37,36 @@ public sealed class OverlayHost
     /// <summary>Screen capture does not see any of the overlay windows, so they need not be hidden for translate-screen.</summary>
     public bool ExcludedFromCapture => Windows.All(w => w.Window.ExcludedFromCapture);
 
+    SharedWindows _shared = SharedWindows.None;
+
+    /// <summary>
+    /// Which windows screen capture sees (Shared on screen); the others stay hidden from it. Applies to the windows
+    /// made so far and to each one made later.
+    /// </summary>
+    public SharedWindows Shared
+    {
+        get => _shared;
+        set
+        {
+            _shared = value;
+            foreach (var (_, window) in Windows) Share(window);
+        }
+    }
+
+    T Made<T>(T window) where T : ClickThroughWindow => Share(window);
+
+    T Share<T>(T window) where T : ClickThroughWindow
+    {
+        window.Shared = window switch
+        {
+            SubtitleOverlay => _shared.Subtitles,
+            HistoryOverlay => _shared.History,
+            LabelsOverlay => _shared.Labels,
+            _ => _shared.Notices,
+        };
+        return window;
+    }
+
     // ---- subtitles ----
 
     /// <summary>Shows the latest dialog lines (oldest first, newest last and brightest) next to the watched region.</summary>
@@ -49,16 +80,22 @@ public sealed class OverlayHost
         }
         Restore();
         _screen = Forms.Screen.FromRectangle(regionPx);
-        (_subtitle ??= new SubtitleOverlay()).ShowLines(lines, regionPx, fontSize, style);
+        (_subtitle ??= Made(new SubtitleOverlay())).ShowLines(lines, regionPx, fontSize, style);
     }
 
-    public void HideSubtitle() => _subtitle?.Dismiss();
+    /// <summary>Hides the lines, fading them out over <paramref name="fade"/> (at once by default).</summary>
+    public void HideSubtitle(TimeSpan fade = default) => _subtitle?.FadeOut(fade);
+
+    /// <summary>The bar under the lines empties over <paramref name="duration"/>, until they go.</summary>
+    public void StartSubtitleCountdown(TimeSpan duration) => _subtitle?.StartCountdown(duration);
+
+    public void StopSubtitleCountdown() => _subtitle?.StopCountdown();
 
     public void ShowLiveBadge(DRect regionPx, string text)
     {
         Restore();
         _screen = Forms.Screen.FromRectangle(regionPx);
-        (_badge ??= new BadgeOverlay()).ShowText(text, regionPx);
+        (_badge ??= Made(new BadgeOverlay())).ShowText(text, regionPx);
     }
 
     public void HideLiveBadge() => _badge?.Dismiss();
@@ -70,7 +107,7 @@ public sealed class OverlayHost
     public void ShowHistory(string title, IReadOnlyList<HistoryLineView> lines, DRect? anchorPx)
     {
         Restore();
-        (_history ??= new HistoryOverlay()).ShowLines(title, lines, ScreenFor(anchorPx).Bounds);
+        (_history ??= Made(new HistoryOverlay())).ShowLines(title, lines, ScreenFor(anchorPx).Bounds);
     }
 
     public void HideHistory() => _history?.Dismiss();
@@ -84,7 +121,7 @@ public sealed class OverlayHost
         NoticePosition position = NoticePosition.TopCenter, DRect? regionPx = null)
     {
         Restore();
-        (_toast ??= new ToastOverlay()).ShowMessage(text, kind, ScreenFor(anchorPx).Bounds, seconds, position, regionPx, _subtitle?.BoundsPx);
+        (_toast ??= Made(new ToastOverlay())).ShowMessage(text, kind, ScreenFor(anchorPx).Bounds, seconds, position, regionPx, _subtitle?.BoundsPx);
     }
 
     /// <summary>Takes the toast away before its time.</summary>
@@ -97,7 +134,7 @@ public sealed class OverlayHost
     {
         Restore();
         _screen = Forms.Screen.FromRectangle(areaPx);
-        (_labels ??= new LabelsOverlay()).ShowLabels(items, _screen.Bounds, baseFontSize);
+        (_labels ??= Made(new LabelsOverlay())).ShowLabels(items, _screen.Bounds, baseFontSize);
     }
 
     /// <summary>Removes the labels and closes their monitor-sized window.</summary>

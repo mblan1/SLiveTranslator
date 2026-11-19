@@ -10,6 +10,9 @@
     <StackPanel Margin="24,12,24,24">
         <TextBlock Style="{StaticResource PageTitle}" Text="{Binding [Overlay.Title], Source={x:Static l:Loc.Instance}}"/>
 
+        <ui:InfoBar Margin="0,0,0,12" IsOpen="True" IsClosable="False" Severity="Informational"
+                    Message="{Binding [Overlay.MovedHint], Source={x:Static l:Loc.Instance}}"/>
+
         <ui:CardControl Icon="{ui:SymbolIcon Eye24}" Margin="0,0,0,16">
             <ui:CardControl.Header>
                 <StackPanel>
@@ -49,24 +52,6 @@
                         VerticalAlignment="Center" Value="{Binding TextOpacity}"/>
                 <TextBlock Width="48" Margin="10,0,0,0" Style="{StaticResource Body}" Text="{Binding TextOpacity, StringFormat={}{0:0} %}"/>
             </StackPanel>
-        </ui:CardControl>
-
-        <ui:CardControl Icon="{ui:SymbolIcon Layer24}" Margin="0,0,0,8">
-            <ui:CardControl.Header>
-                <TextBlock Style="{StaticResource Body}" Text="{Binding [Overlay.BackgroundOpacity], Source={x:Static l:Loc.Instance}}"/>
-            </ui:CardControl.Header>
-            <StackPanel Orientation="Horizontal">
-                <Slider Width="200" Minimum="0" Maximum="100" SmallChange="5" LargeChange="10" IsSnapToTickEnabled="True" TickFrequency="5"
-                        VerticalAlignment="Center" Value="{Binding BackgroundOpacity}"/>
-                <TextBlock Width="48" Margin="10,0,0,0" Style="{StaticResource Body}" Text="{Binding BackgroundOpacity, StringFormat={}{0:0} %}"/>
-            </StackPanel>
-        </ui:CardControl>
-
-        <ui:CardControl Icon="{ui:SymbolIcon WindowText20}" Margin="0,0,0,8">
-            <ui:CardControl.Header>
-                <TextBlock Style="{StaticResource Body}" Text="{Binding [Overlay.Position], Source={x:Static l:Loc.Instance}}"/>
-            </ui:CardControl.Header>
-            <ComboBox Width="220" ItemsSource="{Binding Positions}" SelectedItem="{Binding SelectedPosition}" DisplayMemberPath="Label"/>
         </ui:CardControl>
 
         <ui:CardControl Icon="{ui:SymbolIcon Translate24}" Margin="0,0,0,8">

@@ -39,10 +39,11 @@ Requirements:
 | Default hotkey | Action                                                                 |
 | -------------- | ---------------------------------------------------------------------- |
 | `Ctrl+Shift+S` | Subtitles on/off (asks for the region the first time)                  |
-| `Ctrl+Shift+R` | Select the subtitle region (drag a rectangle, Esc cancels)             |
+| `Ctrl+Shift+R` | Select the regions: where the subtitles are read, then where the translation goes |
 | `Ctrl+Shift+T` | Translate the game window; text under the mouse comes first            |
 | `Ctrl+Shift+H` | Dialog history on/off                                                  |
-| `Ctrl+Shift+X` | Clear the overlay and stop subtitles                                   |
+| `Ctrl+Shift+X` | Clear the text; subtitles stay on (the *Timing* page can make it stop them too) |
+| `Ctrl+Shift+P` | Private overlay ↔ Shared on screen (see below)                         |
 
 Every hotkey can be recorded anew, switched off or reset on the *Hotkeys* page. A hotkey another program
 already uses is shown as *In use* instead of silently not working.
@@ -51,13 +52,34 @@ Typical flow:
 
 1. Start the game in borderless mode and start SLiveTranslator.
 2. When the first subtitle shows, press `Ctrl+Shift+R` and drag a box around **only the subtitle lines**
-   (a wide, low strip). Not the whole screen: that is slow, picks up the HUD and misses lines.
+   (a wide, low strip). Not the whole screen: that is slow, picks up the HUD and misses lines. The picker
+   says right away how many lines it reads there. Enter goes on to the second box: where the translation
+   appears (above, below, over the original, or a box you draw) and its background, transparent by default
+   with an outlined text. Boxes can be moved, resized by their handles or the arrow keys, and drawn again.
 3. Press `Ctrl+Shift+S`. "Subtitles ON" appears and the translation follows the dialog. `Ctrl+Shift+H`
    shows earlier lines.
 4. In the inventory, hover an item and press `Ctrl+Shift+T` to translate the tooltip.
 
 Status messages appear at the top of the game screen (Windows hides tray notifications in games). Which
 messages show, for how long, where, and with or without a sound is set on the *Notifications* page.
+
+### Subtitles: regions, display and timing
+
+The *Subtitles* group of the main window has four pages:
+
+* **Regions** – both boxes on a picture of the monitor, typed coordinates, a *Test reading* button, where the
+  translation goes, its text alignment, and the box behind it (transparent, a colour and its opacity, the
+  text outline).
+* **Display & sharing** – *Private overlay* (the default) hides the translation from screen sharing,
+  recordings and screenshots: only you see it. *Shared on screen* makes it part of the screen, so people in
+  Discord, Teams, Meet or OBS see it too; you choose which parts (subtitles, history, translate-screen labels,
+  notices). Viewers see it when you share the **whole screen**: a share of only the game window leaves it out.
+  In shared mode the translation must keep off the read region (the app's own OCR would read it), so a place
+  that covers the region moves above it. The main window stays out of screen sharing unless switched off here.
+* **Timing** – how long a line stays after the game hides it (a fixed time, by the line's length at your
+  reading speed, or until the next line), the shortest time on screen, fade in and out, a time-left bar,
+  whether a new line pushes the older ones up or replaces them, and what Clear does.
+* **Reading & OCR** – how often and how the region is read.
 
 ## Translation services
 
@@ -165,9 +187,11 @@ bằng OCR có sẵn của Windows, dịch, rồi hiện bản dịch trên mộ
 * **Cài đặt:** tải `SLiveTranslator.exe` (một tệp, không cần cài .NET) và chạy. Biểu tượng nằm ở khay hệ thống;
   chấm xanh nghĩa là phụ đề đang bật. Lần đầu chạy sẽ có trình hướng dẫn: ngôn ngữ, dịch vụ dịch, vùng phụ đề,
   thử phím tắt. Muốn mở cùng Windows, bật mục *Khởi động cùng Windows* ở trang *Chung & Giới thiệu*.
-* **Dùng:** chơi game ở chế độ cửa sổ hoặc borderless. `Ctrl+Shift+R` chọn vùng phụ đề (chỉ dải phụ đề),
-  `Ctrl+Shift+S` bật/tắt phụ đề, `Ctrl+Shift+T` dịch cả màn hình, `Ctrl+Shift+H` xem lịch sử hội thoại,
-  `Ctrl+Shift+X` xóa lớp phủ.
+* **Dùng:** chơi game ở chế độ cửa sổ hoặc borderless. `Ctrl+Shift+R` chọn vùng đọc phụ đề (chỉ dải phụ đề)
+  rồi vùng hiện bản dịch cùng nền của nó (mặc định trong suốt, chữ có viền), `Ctrl+Shift+S` bật/tắt phụ đề,
+  `Ctrl+Shift+T` dịch cả màn hình, `Ctrl+Shift+H` xem lịch sử hội thoại, `Ctrl+Shift+X` xóa chữ (phụ đề vẫn
+  bật), `Ctrl+Shift+P` đổi giữa *Lớp phủ riêng* (chỉ bạn thấy) và *Hiện trên màn hình chia sẻ* (người xem khi
+  bạn chia sẻ cả màn hình cũng thấy). Bản dịch ở lại bao lâu, hiện/mờ dần ra sao: trang *Phụ đề › Thời gian*.
 * **Dịch vụ:** mặc định là dịch miễn phí (Google, rồi MyMemory). Có thể dùng Claude, OpenAI, Gemini (có gói miễn
   phí), DeepL, Microsoft hoặc Google Cloud: nhập khóa API, ứng dụng kiểm tra ngay rồi mới hiện danh sách mô hình.
   Khóa được mã hóa cho tài khoản Windows của bạn.

@@ -32,6 +32,22 @@ public sealed class VisibleWhen : IValueConverter
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => Binding.DoNothing;
 }
 
+/// <summary>A brush of a "#RRGGBB" colour; transparent for "" or anything that is not one.</summary>
+public sealed class HexBrush : IValueConverter
+{
+    public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
+    {
+        string color = BackgroundColors.Normalize(value as string);
+        if (color.Length == 0) return System.Windows.Media.Brushes.Transparent;
+        var (r, g, b) = BackgroundColors.Rgb(color);
+        var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
+
+    public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) => Binding.DoNothing;
+}
+
 /// <summary>Turns a bool round, for IsEnabled and IsReadOnly bindings.</summary>
 public sealed class Not : IValueConverter
 {

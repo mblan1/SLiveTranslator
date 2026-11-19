@@ -3,95 +3,239 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
       xmlns:l="clr-namespace:SLiveTranslator.UI"
+      xmlns:pages="clr-namespace:SLiveTranslator.UI.Pages"
       Title="{Binding [Nav.Home], Source={x:Static l:Loc.Instance}}">
     <Page.Resources>
-        <ResourceDictionary Source="PageStyles.xaml"/>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="PageStyles.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+            <!-- The chips under the subtitles card: each opens the page it sums up. -->
+            <Style x:Key="Chip" TargetType="ui:Button" BasedOn="{StaticResource {x:Type ui:Button}}">
+                <Setter Property="Padding" Value="12,5"/>
+                <Setter Property="Margin" Value="0,0,8,8"/>
+                <Setter Property="FontSize" Value="13"/>
+                <Setter Property="Command" Value="{Binding OpenCommand}"/>
+            </Style>
+        </ResourceDictionary>
     </Page.Resources>
     <StackPanel Margin="24,12,24,24">
         <TextBlock Style="{StaticResource PageTitle}" Text="{Binding [Home.Title], Source={x:Static l:Loc.Instance}}"/>
 
-        <ui:CardControl Icon="{ui:SymbolIcon ClosedCaption24}" Margin="0,0,0,8">
-            <ui:CardControl.Header>
-                <StackPanel>
-                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Home.Subtitles], Source={x:Static l:Loc.Instance}}"/>
-                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Home.SubtitlesHint], Source={x:Static l:Loc.Instance}}"/>
-                </StackPanel>
-            </ui:CardControl.Header>
-            <ui:ToggleSwitch IsChecked="{Binding SubtitlesOn}"/>
-        </ui:CardControl>
-
-        <Border Style="{StaticResource Card}">
+        <!-- Subtitles: the switch, what is on screen, how it is set up and the quick actions. -->
+        <Border Style="{StaticResource Card}" Padding="22,18">
             <StackPanel>
-                <TextBlock Style="{StaticResource SectionTitle}" Text="{Binding [Home.Provider], Source={x:Static l:Loc.Instance}}"/>
-                <TextBlock Style="{StaticResource Body}" FontSize="15" Text="{Binding ProviderLine}"/>
-                <TextBlock Style="{StaticResource Hint}" Text="{Binding ProviderStatusText}"
-                           Visibility="{Binding ProviderStatusOk, Converter={StaticResource VisibleWhen}}"/>
-                <TextBlock Style="{StaticResource Caution}" Text="{Binding ProviderStatusText}"
-                           Visibility="{Binding ProviderStatusOk, Converter={StaticResource VisibleWhen}, ConverterParameter=not}"/>
-            </StackPanel>
-        </Border>
+                <DockPanel>
+                    <Border DockPanel.Dock="Left" Width="48" Height="48" CornerRadius="8" Margin="0,0,16,0"
+                            Background="{DynamicResource ControlFillColorSecondaryBrush}">
+                        <ui:SymbolIcon Symbol="ClosedCaption24" FontSize="26" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                    </Border>
+                    <ui:ToggleSwitch DockPanel.Dock="Right" VerticalAlignment="Center" IsChecked="{Binding SubtitlesOn}"
+                                     AutomationProperties.Name="{Binding [Home.Subtitles], Source={x:Static l:Loc.Instance}}"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource Body}" FontSize="20" FontWeight="SemiBold" Text="{Binding [Home.Subtitles], Source={x:Static l:Loc.Instance}}"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                            <Ellipse Width="8" Height="8" Margin="0,0,8,0" VerticalAlignment="Center" Fill="{DynamicResource SystemFillColorSuccessBrush}"
+                                     Visibility="{Binding SubtitlesOn, Converter={StaticResource VisibleWhen}}"/>
+                            <TextBlock Style="{StaticResource Hint}" Margin="0" FontSize="13" Text="{Binding SubtitlesStatus}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </DockPanel>
 
-        <Border Style="{StaticResource Card}">
-            <StackPanel>
-                <TextBlock Style="{StaticResource SectionTitle}" Text="{Binding [Home.FreeServices], Source={x:Static l:Loc.Instance}}"/>
-                <TextBlock Style="{StaticResource Body}" Text="{Binding GoogleStatus}"/>
-                <TextBlock Style="{StaticResource Body}" Margin="0,8,0,4" Text="{Binding MyMemoryText}"/>
-                <ProgressBar Height="6" Maximum="1" Value="{Binding MyMemoryFraction, Mode=OneWay}" Margin="0,0,0,12"/>
-                <TextBlock Style="{StaticResource Body}" FontWeight="SemiBold" Margin="0,0,0,4"
-                           Text="{Binding [Home.RecommendTitle], Source={x:Static l:Loc.Instance}}"/>
-                <ItemsControl ItemsSource="{Binding Recommendations}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <DockPanel Margin="0,2">
-                                <TextBlock DockPanel.Dock="Left" Width="22" Style="{StaticResource Body}" Text="{Binding Number, StringFormat={}{0}.}"/>
-                                <TextBlock DockPanel.Dock="Right" Margin="8,0,0,0" Style="{StaticResource Body}" Text="✓"
-                                           Foreground="{DynamicResource SystemFillColorSuccessBrush}"
-                                           Visibility="{Binding Done, Converter={StaticResource VisibleWhen}}"/>
-                                <TextBlock Style="{StaticResource Body}" Text="{Binding Text}"/>
-                            </DockPanel>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-        </Border>
+                <Border Margin="0,16,0,0" Padding="14,12" CornerRadius="6" Background="{DynamicResource ControlFillColorSecondaryBrush}"
+                        Visibility="{Binding HasLastLine, Converter={StaticResource VisibleWhen}}">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource SmallLabel}" Text="{Binding [Home.LastLine], Source={x:Static l:Loc.Instance}}"/>
+                        <TextBlock Style="{StaticResource Body}" FontSize="16" Margin="0,4,0,2" Text="{Binding LastTranslation}"/>
+                        <TextBlock Style="{StaticResource Hint}" FontSize="13" Text="{Binding LastOriginal}"/>
+                    </StackPanel>
+                </Border>
 
-        <Border Style="{StaticResource Card}">
-            <StackPanel>
-                <TextBlock Style="{StaticResource SectionTitle}" Text="{Binding [Home.QuickActions], Source={x:Static l:Loc.Instance}}"/>
+                <WrapPanel Margin="0,14,0,0">
+                    <ui:Button Style="{StaticResource Chip}" CommandParameter="{x:Static l:SettingsViewModel.RegionsPage}">
+                        <StackPanel Orientation="Horizontal">
+                            <Border Width="10" Height="10" BorderThickness="2" BorderBrush="{StaticResource ReadBrush}" CornerRadius="2" Margin="0,0,8,0"/>
+                            <TextBlock Text="{Binding ReadChip}"/>
+                        </StackPanel>
+                    </ui:Button>
+                    <ui:Button Style="{StaticResource Chip}" CommandParameter="{x:Static l:SettingsViewModel.RegionsPage}">
+                        <StackPanel Orientation="Horizontal">
+                            <Border Width="10" Height="10" BorderThickness="2" BorderBrush="{StaticResource ShowBrush}" CornerRadius="2" Margin="0,0,8,0"/>
+                            <TextBlock Text="{Binding PlaceChip}"/>
+                        </StackPanel>
+                    </ui:Button>
+                    <ui:Button Style="{StaticResource Chip}" CommandParameter="{x:Static l:SettingsViewModel.DisplayPage}">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="EyeOff16" Margin="0,0,8,0" Visibility="{Binding Shared, Converter={StaticResource VisibleWhen}, ConverterParameter=not}"/>
+                            <ui:SymbolIcon Symbol="ShareScreenStart20" Margin="0,0,8,0" Visibility="{Binding Shared, Converter={StaticResource VisibleWhen}}"/>
+                            <TextBlock Text="{Binding ModeName}"/>
+                        </StackPanel>
+                    </ui:Button>
+                    <ui:Button Style="{StaticResource Chip}" CommandParameter="{x:Static l:SettingsViewModel.TimingPage}">
+                        <StackPanel Orientation="Horizontal">
+                            <ui:SymbolIcon Symbol="Timer20" Margin="0,0,8,0"/>
+                            <TextBlock Text="{Binding TimingChip}"/>
+                        </StackPanel>
+                    </ui:Button>
+                </WrapPanel>
+
+                <Border Height="1" Margin="0,6,0,14" Background="{DynamicResource CardStrokeColorDefaultBrush}"/>
+
                 <WrapPanel>
-                    <ui:Button Margin="0,0,8,8" Icon="{ui:SymbolIcon SelectObject24}" Command="{Binding SelectRegionCommand}"
-                               Content="{Binding [Action.SelectRegion], Source={x:Static l:Loc.Instance}}"/>
+                    <ui:Button Margin="0,0,8,8" Appearance="Primary" Icon="{ui:SymbolIcon SelectObject24}" Command="{Binding SelectRegionCommand}"
+                               Content="{Binding [Home.SelectRegions], Source={x:Static l:Loc.Instance}}"/>
+                    <ui:Button Margin="0,0,8,8" Icon="{ui:SymbolIcon Broom24}" Command="{Binding ClearCommand}"
+                               Content="{Binding [Home.ClearText], Source={x:Static l:Loc.Instance}}"/>
                     <ui:Button Margin="0,0,8,8" Icon="{ui:SymbolIcon ScanText24}" Command="{Binding TranslateScreenCommand}"
                                Content="{Binding [Action.TranslateScreen], Source={x:Static l:Loc.Instance}}"/>
                     <ui:Button Margin="0,0,8,8" Icon="{ui:SymbolIcon History24}" Command="{Binding HistoryCommand}"
                                Content="{Binding [Home.ShowHistory], Source={x:Static l:Loc.Instance}}"/>
+                    <ui:Button Margin="0,0,8,8" Icon="{ui:SymbolIcon Play24}" Command="{Binding PreviewCommand}"
+                               Content="{Binding [Home.Preview], Source={x:Static l:Loc.Instance}}"/>
                 </WrapPanel>
             </StackPanel>
         </Border>
 
-        <Border Style="{StaticResource Card}">
-            <StackPanel>
-                <TextBlock Style="{StaticResource SectionTitle}" Text="{Binding [Home.Hotkeys], Source={x:Static l:Loc.Instance}}"/>
-                <ItemsControl ItemsSource="{Binding Hotkeys}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Grid Margin="0,3">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="200"/>
-                                    <ColumnDefinition Width="180"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Style="{StaticResource Body}" Text="{Binding Action}"/>
-                                <TextBlock Grid.Column="1" Style="{StaticResource Body}" FontFamily="Consolas" Text="{Binding Gesture}"/>
-                                <TextBlock Grid.Column="2" Style="{StaticResource Hint}" Text="{Binding State}"
-                                           Visibility="{Binding Ok, Converter={StaticResource VisibleWhen}}"/>
-                                <TextBlock Grid.Column="2" Style="{StaticResource Caution}" Text="{Binding State}"
-                                           Visibility="{Binding Ok, Converter={StaticResource VisibleWhen}, ConverterParameter=not}"/>
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-        </Border>
+        <!-- The three parts of the setup, each with a way to its page. -->
+        <UniformGrid Columns="3">
+            <Border Style="{StaticResource Card}" Margin="0,0,4,8" Padding="18,16">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
+                        <ui:SymbolIcon Symbol="SelectObject24" Margin="0,0,10,0" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                        <TextBlock Style="{StaticResource SectionTitle}" Margin="0" Text="{Binding [Nav.Regions], Source={x:Static l:Loc.Instance}}"/>
+                    </StackPanel>
+                    <ui:HyperlinkButton DockPanel.Dock="Bottom" Padding="0,4" Margin="0,10,0,0" Command="{Binding OpenCommand}"
+                                        CommandParameter="{x:Static l:SettingsViewModel.RegionsPage}"
+                                        Content="{Binding [Home.EditRegions], Source={x:Static l:Loc.Instance}}"/>
+                    <StackPanel>
+                        <Border Width="{x:Static pages:HomeViewModel.PreviewWidth}" Height="{x:Static pages:HomeViewModel.PreviewHeight}" HorizontalAlignment="Left"
+                                Background="{StaticResource ScreenSky}" CornerRadius="5" ClipToBounds="True">
+                            <Canvas>
+                                <Rectangle Canvas.Left="0" Canvas.Top="92" Width="{x:Static pages:HomeViewModel.PreviewWidth}" Height="52" Fill="{StaticResource ScreenGround}"/>
+                                <Rectangle Canvas.Left="{Binding Preview.Read.Left}" Canvas.Top="{Binding Preview.Read.Top}" Width="{Binding Preview.Read.Width}"
+                                           Height="{Binding Preview.Read.Height}" Stroke="{StaticResource ReadBrush}" StrokeThickness="1.5" Fill="{StaticResource ReadFill}"
+                                           Visibility="{Binding Preview.Read, Converter={StaticResource VisibleWhen}}"/>
+                                <Rectangle Canvas.Left="{Binding Preview.Show.Left}" Canvas.Top="{Binding Preview.Show.Top}" Width="{Binding Preview.Show.Width}"
+                                           Height="{Binding Preview.Show.Height}" Stroke="{StaticResource ShowBrush}" StrokeThickness="1.5" StrokeDashArray="3 2"
+                                           Fill="{StaticResource ShowFill}" Visibility="{Binding Preview.Show, Converter={StaticResource VisibleWhen}}"/>
+                            </Canvas>
+                        </Border>
+                        <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0" Text="{Binding Preview.MonitorText}"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="4,0,4,8" Padding="18,16">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
+                        <ui:SymbolIcon Symbol="ShareScreenStart24" Margin="0,0,10,0" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                        <TextBlock Style="{StaticResource SectionTitle}" Margin="0" Text="{Binding [Nav.Display], Source={x:Static l:Loc.Instance}}"/>
+                    </StackPanel>
+                    <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Margin="0,10,0,0">
+                        <ui:HyperlinkButton Padding="0,4" Command="{Binding OpenCommand}" CommandParameter="{x:Static l:SettingsViewModel.DisplayPage}"
+                                            Content="{Binding [Home.ChangeMode], Source={x:Static l:Loc.Instance}}"/>
+                        <TextBlock Style="{StaticResource Hint}" Margin="12,0,0,0" VerticalAlignment="Center" FontFamily="Consolas" Text="{Binding ModeHotkey}"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource Body}" FontSize="17" FontWeight="SemiBold" Text="{Binding ModeName}"/>
+                        <TextBlock Style="{StaticResource Hint}" FontSize="13" Margin="0,6,0,0" Text="{Binding ModeDescription}"/>
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="4,0,0,8" Padding="18,16">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                        <ui:SymbolIcon Symbol="Timer24" Margin="0,0,10,0" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                        <TextBlock Style="{StaticResource SectionTitle}" Margin="0" Text="{Binding [Nav.Timing], Source={x:Static l:Loc.Instance}}"/>
+                    </StackPanel>
+                    <ui:HyperlinkButton DockPanel.Dock="Bottom" Padding="0,4" Margin="0,10,0,0" Command="{Binding OpenCommand}"
+                                        CommandParameter="{x:Static l:SettingsViewModel.TimingPage}"
+                                        Content="{Binding [Home.AdjustTiming], Source={x:Static l:Loc.Instance}}"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Style="{StaticResource Hint}" Margin="0,6,8,6" FontSize="13" Text="{Binding [Home.StayLabel], Source={x:Static l:Loc.Instance}}"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Body}" FontWeight="SemiBold" Text="{Binding StayValue}"/>
+                        <TextBlock Grid.Row="1" Style="{StaticResource Hint}" Margin="0,6,8,6" FontSize="13" Text="{Binding [Home.MinLabel], Source={x:Static l:Loc.Instance}}"/>
+                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Body}" FontWeight="SemiBold" Text="{Binding MinValue}"/>
+                        <TextBlock Grid.Row="2" Style="{StaticResource Hint}" Margin="0,6,8,6" FontSize="13" Text="{Binding [Home.FadeLabel], Source={x:Static l:Loc.Instance}}"/>
+                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Body}" FontWeight="SemiBold" Text="{Binding FadeValue}"/>
+                        <TextBlock Grid.Row="3" Style="{StaticResource Hint}" Margin="0,6,8,6" FontSize="13" Text="{Binding [Home.ClearLabel], Source={x:Static l:Loc.Instance}}"/>
+                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Body}" FontWeight="SemiBold" Text="{Binding ClearValue}"/>
+                    </Grid>
+                </DockPanel>
+            </Border>
+        </UniformGrid>
+
+        <!-- The translation service and the hotkeys. -->
+        <UniformGrid Columns="2">
+            <Border Style="{StaticResource Card}" Margin="0,0,4,8" Padding="18,16">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                        <ui:SymbolIcon Symbol="Translate24" Margin="0,0,10,0" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                        <TextBlock Style="{StaticResource SectionTitle}" Margin="0" Text="{Binding [Home.Provider], Source={x:Static l:Loc.Instance}}"/>
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Body}" FontSize="15" Text="{Binding ProviderLine}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding ProviderStatusText}"
+                               Visibility="{Binding ProviderStatusOk, Converter={StaticResource VisibleWhen}}"/>
+                    <TextBlock Style="{StaticResource Caution}" Text="{Binding ProviderStatusText}"
+                               Visibility="{Binding ProviderStatusOk, Converter={StaticResource VisibleWhen}, ConverterParameter=not}"/>
+                    <Border Height="1" Margin="0,12" Background="{DynamicResource CardStrokeColorDefaultBrush}"/>
+                    <TextBlock Style="{StaticResource Body}" FontWeight="SemiBold" Text="{Binding [Home.FreeServices], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" FontSize="13" Margin="0,4,0,0" Text="{Binding GoogleStatus}"/>
+                    <TextBlock Style="{StaticResource Hint}" FontSize="13" Margin="0,6,0,4" Text="{Binding MyMemoryText}"/>
+                    <ProgressBar Height="6" Maximum="1" Value="{Binding MyMemoryFraction, Mode=OneWay}" Margin="0,0,0,12"/>
+                    <TextBlock Style="{StaticResource Body}" FontWeight="SemiBold" Margin="0,0,0,4"
+                               Text="{Binding [Home.RecommendTitle], Source={x:Static l:Loc.Instance}}"/>
+                    <ItemsControl ItemsSource="{Binding Recommendations}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel Margin="0,2">
+                                    <TextBlock DockPanel.Dock="Left" Width="22" Style="{StaticResource Hint}" FontSize="13" Text="{Binding Number, StringFormat={}{0}.}"/>
+                                    <TextBlock DockPanel.Dock="Right" Margin="8,0,0,0" Style="{StaticResource Body}" Text="✓"
+                                               Foreground="{DynamicResource SystemFillColorSuccessBrush}"
+                                               Visibility="{Binding Done, Converter={StaticResource VisibleWhen}}"/>
+                                    <TextBlock Style="{StaticResource Hint}" FontSize="13" Text="{Binding Text}"/>
+                                </DockPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+
+            <Border Style="{StaticResource Card}" Margin="4,0,0,8" Padding="18,16">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                        <ui:SymbolIcon Symbol="Keyboard24" Margin="0,0,10,0" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}"/>
+                        <TextBlock Style="{StaticResource SectionTitle}" Margin="0" Text="{Binding [Home.Hotkeys], Source={x:Static l:Loc.Instance}}"/>
+                    </StackPanel>
+                    <ItemsControl ItemsSource="{Binding Hotkeys}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderThickness="0,0,0,1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" Padding="0,7">
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Right" Style="{StaticResource Tag}" Background="{DynamicResource ControlFillColorSecondaryBrush}" VerticalAlignment="Center">
+                                            <TextBlock FontFamily="Consolas" FontSize="12" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Text="{Binding Gesture}"/>
+                                        </Border>
+                                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource Caution}" Margin="0,0,10,0" VerticalAlignment="Center" Text="{Binding State}"
+                                                   Visibility="{Binding Ok, Converter={StaticResource VisibleWhen}, ConverterParameter=not}"/>
+                                        <TextBlock Style="{StaticResource Body}" Text="{Binding Action}"/>
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </UniformGrid>
     </StackPanel>
 </Page>

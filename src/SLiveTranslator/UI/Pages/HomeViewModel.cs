@@ -26,7 +26,16 @@ public sealed class HomeViewModel : ObservableObject
         SelectRegionCommand = new RelayCommand(host.SelectRegion);
         TranslateScreenCommand = new RelayCommand(host.TranslateScreen);
         HistoryCommand = new RelayCommand(host.ToggleHistory);
+        ClearCommand = new RelayCommand(host.ClearOverlay);
+        PreviewCommand = new RelayCommand(() => host.PreviewOverlay(SettingsStore.Clone(Current).Overlay));
+        OpenCommand = new RelayCommand<string>(page =>
+        {
+            if (page is not null) Navigate?.Invoke(page);
+        });
     }
+
+    /// <summary>Shows another page of the window (set by the window's view model).</summary>
+    public Action<string>? Navigate { get; set; }
 
     AppSettings Current => _host.Current;
 
@@ -93,6 +102,57 @@ public sealed class HomeViewModel : ObservableObject
     public RelayCommand SelectRegionCommand { get; }
     public RelayCommand TranslateScreenCommand { get; }
     public RelayCommand HistoryCommand { get; }
+    public RelayCommand ClearCommand { get; }
+    public RelayCommand PreviewCommand { get; }
+
+    /// <summary>Opens a page by its name (see <see cref="SettingsViewModel.RegionsPage"/>).</summary>
+    public RelayCommand<string> OpenCommand { get; }
+
+    // ---- the subtitles card ----
+
+    /// <summary>"On · following the dialog · 142 lines this session", or how to turn them on.</summary>
+    public string SubtitlesStatus => _host.SubtitlesOn
+        ? Loc.F("Home.StatusOn", _host.HistoryRecords(int.MaxValue).Count)
+        : Loc.F("Home.StatusOff", Current.Hotkeys[HotkeyAction.ToggleSubtitles]);
+
+    SubtitleRecord? LastRecord => _host.HistoryRecords(1) is { Count: > 0 } records ? records[^1] : null;
+
+    public bool HasLastLine => LastRecord is { Translation: { Length: > 0 } };
+    public string LastTranslation => LastRecord?.Translation ?? "";
+    public string LastOriginal => LastRecord?.Source ?? "";
+
+    public string ReadChip => Current.Subtitles.Region is { } r ? Loc.F("Home.ChipRead", r.Width, r.Height) : Loc.Instance["Home.ChipNoRegion"];
+    public string PlaceChip => Loc.Instance["Home.Place." + Current.Overlay.Position];
+    public string ModeName => Loc.Instance["DisplayMode." + Current.Overlay.DisplayMode];
+    public bool Shared => Current.Overlay.DisplayMode == DisplayMode.Shared;
+
+    public string TimingChip => Current.Overlay.Stay switch
+    {
+        StayMode.UntilNext => Loc.Instance["Home.ChipUntilNext"],
+        StayMode.ByLength => Loc.Instance["Home.ChipByLength"],
+        _ => Loc.F("Home.ChipStay", Current.Overlay.StaySeconds.ToString("0.#", Loc.Instance.Culture)),
+    };
+
+    // ---- the cards under it ----
+
+    public const double PreviewWidth = 256;
+    public const double PreviewHeight = 144;
+
+    public RegionPreview Preview => RegionPreview.For(Current, PreviewWidth, PreviewHeight);
+
+    public string ModeDescription => Loc.Instance[Shared ? "Home.ModeSharedText" : "Home.ModePrivateText"];
+    public string ModeHotkey => Current.Hotkeys[HotkeyAction.SwitchDisplayMode];
+
+    public string StayValue => Current.Overlay.Stay switch
+    {
+        StayMode.UntilNext => Loc.Instance["Home.StayUntilNext"],
+        StayMode.ByLength => Loc.F("Home.StayByLength", Current.Overlay.ReadingSpeed),
+        _ => Loc.F("Timing.SecondsValue", Current.Overlay.StaySeconds.ToString("0.0", Loc.Instance.Culture)),
+    };
+
+    public string MinValue => Loc.F("Timing.SecondsValue", Current.Overlay.MinSeconds.ToString("0.0", Loc.Instance.Culture));
+    public string FadeValue => Loc.F("Timing.SecondsValue", (Current.Overlay.FadeOutMs / 1000.0).ToString("0.0#", Loc.Instance.Culture));
+    public string ClearValue => Loc.Instance[Current.Overlay.Clear == ClearMode.TextOnly ? "Home.ClearKeeps" : "Home.ClearStops"];
 
     /// <summary>The app's state changed: every text is read again.</summary>
     public void Refresh() => OnPropertyChanged(string.Empty);

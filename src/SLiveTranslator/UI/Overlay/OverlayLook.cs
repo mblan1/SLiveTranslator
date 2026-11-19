@@ -1,5 +1,6 @@
 using System;
 using System.Windows.Media;
+using System.Windows.Media.Effects;
 
 namespace SLiveTranslator.UI.Overlay;
 
@@ -27,15 +28,39 @@ internal static class OverlayLook
     static readonly Brush AccentWarning = Frozen(0xFF, 0xFF, 0xB3, 0x00);
     static readonly Brush AccentError = Frozen(0xFF, 0xF4, 0x43, 0x36);
 
+    public static readonly Brush TimeLeftTrack = Frozen(0x2E, 0xFF, 0xFF, 0xFF);
+    public static readonly Brush TimeLeftFill = Frozen(0xCC, 0xFF, 0xFF, 0xFF);
+
+    /// <summary>The dark halo round each letter of the outlined subtitles.</summary>
+    public static readonly Effect OutlineHalo = FrozenShadow(depth: 0, blur: 4, opacity: 1);
+
+    /// <summary>The shadow a little below the letters, over the halo: together they read like an outline.</summary>
+    public static readonly Effect OutlineDrop = FrozenShadow(depth: 1.5, blur: 3, opacity: 0.9);
+
     static Brush _subtitleBackground = SubtitleBackground;
 
-    /// <summary>The subtitle box's background at an opacity (0 to 1); the brush of the last opacity asked for is kept, so a line allocates none.</summary>
-    public static Brush SubtitleBackgroundAt(double opacity)
+    /// <summary>The subtitle box's dark background at an opacity (0 to 1).</summary>
+    public static Brush SubtitleBackgroundAt(double opacity) => SubtitleBackgroundAt(SubtitleStyle.DarkBox, opacity);
+
+    /// <summary>
+    /// The subtitle box's background in a colour ("#RRGGBB"; "" is transparent) at an opacity (0 to 1). The brush of the
+    /// last colour and opacity asked for is kept, so a line allocates none.
+    /// </summary>
+    public static Brush SubtitleBackgroundAt(string color, double opacity)
     {
+        if (BackgroundColors.Normalize(color).Length == 0) return Brushes.Transparent;
         byte alpha = (byte)Math.Round(Math.Clamp(opacity, 0, 1) * 255);
+        var (r, g, b) = BackgroundColors.Rgb(color);
         var brush = _subtitleBackground;
-        if (((SolidColorBrush)brush).Color.A != alpha) _subtitleBackground = brush = Frozen(alpha, 0x10, 0x14, 0x18);
+        if (((SolidColorBrush)brush).Color != Color.FromArgb(alpha, r, g, b)) _subtitleBackground = brush = Frozen(alpha, r, g, b);
         return brush;
+    }
+
+    static Effect FrozenShadow(double depth, double blur, double opacity)
+    {
+        var effect = new DropShadowEffect { Color = Colors.Black, ShadowDepth = depth, BlurRadius = blur, Opacity = opacity, Direction = 270 };
+        effect.Freeze();
+        return effect;
     }
 
     /// <summary>The colour of a toast's bottom edge.</summary>

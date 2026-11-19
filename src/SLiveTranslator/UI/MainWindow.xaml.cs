@@ -45,7 +45,8 @@ public partial class MainWindow : FluentWindow, IUserPrompts
         DataContext = vm;
         vm.Prompts = this;
         RootNavigation.SetPageProviderService(new PageProvider(vm));
-        SourceInitialized += (_, _) => ExcludedFromCapture = Native.SetWindowDisplayAffinity(new WindowInteropHelper(this).Handle, Native.WDA_EXCLUDEFROMCAPTURE);
+        vm.NavigateRequested += OnNavigateRequested;
+        SourceInitialized += (_, _) => ApplyCaptureAffinity();
         Loaded += OnLoaded;
         AddHandler(TextBoxBase.TextChangedEvent, new TextChangedEventHandler(OnTextChanged));
         AddHandler(LostFocusEvent, new RoutedEventHandler(OnLostFocus), handledEventsToo: true);
@@ -56,6 +57,28 @@ public partial class MainWindow : FluentWindow, IUserPrompts
     /// <summary>Screen capture, and so the app's own OCR, does not see the window.</summary>
     public bool ExcludedFromCapture { get; private set; }
 
+    bool _hideFromCapture = true;
+
+    /// <summary>Screen sharing and recording leave the window out (the setting on Display &amp; sharing; on by default).</summary>
+    public bool HideFromCapture
+    {
+        get => _hideFromCapture;
+        set
+        {
+            if (_hideFromCapture == value) return;
+            _hideFromCapture = value;
+            ApplyCaptureAffinity();
+        }
+    }
+
+    void ApplyCaptureAffinity()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == IntPtr.Zero) return;
+        bool ok = Native.SetWindowDisplayAffinity(hwnd, _hideFromCapture ? Native.WDA_EXCLUDEFROMCAPTURE : Native.WDA_NONE);
+        ExcludedFromCapture = _hideFromCapture && ok;
+    }
+
     /// <summary>Closes without asking about unsaved edits (the app exits).</summary>
     public bool SkipUnsavedQuestion { get; set; }
 
@@ -63,10 +86,10 @@ public partial class MainWindow : FluentWindow, IUserPrompts
     /// Makes and shows the window: WPF-UI's dictionaries are merged first (on the first open of the run), and the
     /// window becomes the app's MainWindow before any theme call, so the theme lands on it and not on an overlay.
     /// </summary>
-    public static MainWindow Open(SettingsViewModel vm, AppTheme theme)
+    public static MainWindow Open(SettingsViewModel vm, AppTheme theme, bool hideFromCapture = true)
     {
         FluentTheme.EnsureLoaded(theme);
-        var window = new MainWindow(vm, theme);
+        var window = new MainWindow(vm, theme) { _hideFromCapture = hideFromCapture };
         Application.Current.MainWindow = window;
         window.Show();
         return window;
@@ -143,8 +166,23 @@ public partial class MainWindow : FluentWindow, IUserPrompts
             ? box.Value is { } value && Math.Abs(value - typed) < 1e-9
             : box.Text.Trim().Length == 0 && box.Value is null;
 
+    /// <summary>A page asked for another one (Home's cards, Display &amp; sharing's "Change region").</summary>
+    void OnNavigateRequested(object? sender, string page)
+    {
+        var type = page switch
+        {
+            SettingsViewModel.RegionsPage => typeof(RegionsPage),
+            SettingsViewModel.DisplayPage => typeof(DisplayPage),
+            SettingsViewModel.TimingPage => typeof(TimingPage),
+            SettingsViewModel.AppearancePage => typeof(OverlayPage),
+            _ => null,
+        };
+        if (type is not null) RootNavigation.Navigate(type);
+    }
+
     void OnClosed(object? sender, EventArgs e)
     {
+        _vm.NavigateRequested -= OnNavigateRequested;
         _vm.Dispose();
         // A closed window must not stay the app's MainWindow: it would be kept alive, and theme calls would go to it.
         if (ReferenceEquals(Application.Current.MainWindow, this)) Application.Current.MainWindow = null;
@@ -240,6 +278,9 @@ public partial class MainWindow : FluentWindow, IUserPrompts
                 : pageType == typeof(TranslationPage) ? vm.Translation
                 : pageType == typeof(GameProfilePage) ? vm.Profiles
                 : pageType == typeof(SubtitlesPage) ? vm.Subtitles
+                : pageType == typeof(RegionsPage) ? vm.Regions
+                : pageType == typeof(DisplayPage) ? vm.Display
+                : pageType == typeof(TimingPage) ? vm.Timing
                 : pageType == typeof(OverlayPage) ? vm.Overlay
                 : pageType == typeof(HotkeysPage) ? vm.Hotkeys
                 : pageType == typeof(NotificationsPage) ? vm.Notifications

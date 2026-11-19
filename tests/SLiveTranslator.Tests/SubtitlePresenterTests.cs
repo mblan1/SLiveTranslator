@@ -77,7 +77,7 @@ public class SubtitlePresenterTests
     static ClickThroughWindow Window(OverlayHost overlay, string name) => overlay.Windows.Single(w => w.Name == name).Window;
 
     static TextBlock[] SubtitleBlocks(OverlayHost overlay) =>
-        ((StackPanel)((Border)Window(overlay, "subtitles").Content).Child).Children.OfType<TextBlock>().Where(b => b.Visibility == Visibility.Visible).ToArray();
+        OverlayHostTests.SubtitleTextBlocks(Window(overlay, "subtitles")).Where(b => b.Visibility == Visibility.Visible).ToArray();
 
     static string Text(TextBlock block) => new TextRange(block.ContentStart, block.ContentEnd).Text;
 

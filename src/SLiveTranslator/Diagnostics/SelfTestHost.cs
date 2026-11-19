@@ -51,7 +51,18 @@ internal sealed class SelfTestHost : ISettingsHost
         public void DeleteValue(string name) => _values.Remove(name);
     }
 
-    public AppSettings Current { get; private set; } = new() { General = { FirstRunDone = true } };
+    /// <summary>Default settings with a subtitle region at the bottom of the primary monitor, so the region pictures show something.</summary>
+    public AppSettings Current { get; private set; } = new()
+    {
+        General = { FirstRunDone = true },
+        Subtitles = { Region = SampleRegion() },
+    };
+
+    static RegionSettings SampleRegion()
+    {
+        var b = System.Windows.Forms.Screen.PrimaryScreen?.Bounds ?? new System.Drawing.Rectangle(0, 0, 1920, 1080);
+        return new RegionSettings(b.Left + b.Width / 5, b.Bottom - b.Height * 18 / 100, b.Width * 3 / 5, b.Height / 8);
+    }
 
     public SaveResult Save(AppSettings settings, SettingsChange changes)
     {

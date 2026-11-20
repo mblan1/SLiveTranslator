@@ -54,7 +54,8 @@ already uses is shown as *In use* instead of silently not working.
 
 ### In-game menu
 
-`Ctrl+Shift+O` opens a menu in the middle of the game window: subtitles on/off, select regions, clear text,
+`Ctrl+Shift+O` opens a menu in the top-right corner of the game window (another corner or the middle can be
+chosen on the *Appearance* page): subtitles on/off, select regions, clear text,
 translate screen, dialog history, Private ↔ Shared, font size − / +, mute notices, settings and quit, each with
 its own hotkey shown. It never takes the focus from the game, so subtitles keep running: click a row, or use
 ↑ ↓ and Enter, the number keys 1–9 and 0, and ← → for the font size (shown at once, then saved). Esc, the hotkey again, a

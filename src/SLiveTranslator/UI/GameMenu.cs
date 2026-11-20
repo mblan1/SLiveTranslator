@@ -100,11 +100,25 @@ public static class GameMenu
         return digit is >= 0 and <= 9 && index < count ? index : null;
     }
 
-    /// <summary>The menu's top-left corner: in the middle of the game window, kept on its monitor.</summary>
-    public static DPoint Place(DRect area, DSize size, DRect screen)
+    /// <summary>
+    /// The menu's top-left corner: in a corner of the game window, <paramref name="margin"/> in from its edges (top right
+    /// by default, see <see cref="OverlaySettings.MenuPosition"/>), or in its middle; the part of the window on its
+    /// monitor counts, so a window larger than the screen still shows the whole menu.
+    /// </summary>
+    public static DPoint Place(DRect area, DSize size, DRect screen, MenuPlacement placement = MenuPlacement.TopRight, int margin = 0)
     {
-        int x = area.Left + (area.Width - size.Width) / 2;
-        int y = area.Top + (area.Height - size.Height) / 2;
+        var box = DRect.Intersect(area, screen);
+        if (box.Width <= 0 || box.Height <= 0) box = screen;
+        int left = box.Left + margin, right = box.Right - margin - size.Width;
+        int top = box.Top + margin, bottom = box.Bottom - margin - size.Height;
+        var (x, y) = placement switch
+        {
+            MenuPlacement.TopLeft => (left, top),
+            MenuPlacement.BottomLeft => (left, bottom),
+            MenuPlacement.BottomRight => (right, bottom),
+            MenuPlacement.Center => (box.Left + (box.Width - size.Width) / 2, box.Top + (box.Height - size.Height) / 2),
+            _ => (right, top),
+        };
         return new DPoint(Math.Clamp(x, screen.Left, Math.Max(screen.Left, screen.Right - size.Width)),
             Math.Clamp(y, screen.Top, Math.Max(screen.Top, screen.Bottom - size.Height)));
     }

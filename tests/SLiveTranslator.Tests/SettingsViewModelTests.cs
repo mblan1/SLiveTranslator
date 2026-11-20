@@ -307,7 +307,8 @@ public class SettingsViewModelTests
             language.Switch();
 
             Assert.NotSame(before.Positions, vm.Overlay.Positions);
-            Assert.Equal([nameof(OverlayViewModel.Positions), nameof(OverlayViewModel.SelectedPosition)], raised); // the list first, so the combo keeps its pick
+            Assert.Equal([nameof(OverlayViewModel.Positions), nameof(OverlayViewModel.SelectedPosition),
+                nameof(OverlayViewModel.MenuPositions), nameof(OverlayViewModel.SelectedMenuPosition)], raised); // each list before its pick, so the combo keeps it
             Assert.Equal(SubtitlePosition.AboveRegion, vm.Overlay.SelectedPosition.Value);
             Assert.NotSame(before.OcrModes, vm.Subtitles.OcrModes);
             Assert.Equal(OcrMode.Plain, vm.Subtitles.SelectedOcrMode.Value);

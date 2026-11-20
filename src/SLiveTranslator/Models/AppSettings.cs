@@ -87,6 +87,9 @@ public enum ClearMode { TextOnly, StopSubtitles }
 
 public enum TextAlign { Left, Center, Right }
 
+/// <summary>Where the in-game menu opens over the game window.</summary>
+public enum MenuPlacement { TopRight, TopLeft, Center, BottomLeft, BottomRight }
+
 /// <summary>In <see cref="DisplayMode.Shared"/>, which overlay windows screen capture sees; the rest stay private.</summary>
 public sealed class ShareSettings : SettingsSection
 {
@@ -105,6 +108,9 @@ public sealed class OverlaySettings : SettingsSection
 
     /// <summary>The newest line's size in DIPs (px at 100 %); older lines and the original are drawn a little smaller.</summary>
     public int FontSize { get; set; } = DefaultFontSize;
+
+    /// <summary>Where the in-game menu opens: a corner of the game window, or its middle.</summary>
+    public MenuPlacement MenuPosition { get; set; } = MenuPlacement.TopRight;
     public int MaxLines { get; set; } = 3;
     public double TextOpacity { get; set; } = 1.0;
 

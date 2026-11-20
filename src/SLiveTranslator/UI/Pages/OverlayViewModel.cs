@@ -12,17 +12,33 @@ public sealed class OverlayViewModel : SettingsPageViewModel
     public OverlayViewModel(SettingsViewModel root, ISettingsHost host) : base(root)
     {
         Positions = Choices<SubtitlePosition>("Position.");
+        MenuPositions = Choices<MenuPlacement>("MenuPosition.");
         PreviewCommand = new RelayCommand(() => host.PreviewOverlay(SettingsStore.Clone(Working).Overlay));
     }
 
     OverlaySettings O => Working.Overlay;
 
-    /// <summary>The app's language changed: the position list is written again in it, the selection kept.</summary>
+    /// <summary>The app's language changed: the position lists are written again in it, the selection kept.</summary>
     public void Relocalize()
     {
         Positions = Choices<SubtitlePosition>("Position.");
+        MenuPositions = Choices<MenuPlacement>("MenuPosition.");
         OnPropertyChanged(nameof(Positions));
         OnPropertyChanged(nameof(SelectedPosition));
+        OnPropertyChanged(nameof(MenuPositions));
+        OnPropertyChanged(nameof(SelectedMenuPosition));
+    }
+
+    /// <summary>Where the in-game menu opens: top right (the default), the other corners, or the middle of the game window.</summary>
+    public IReadOnlyList<Choice<MenuPlacement>> MenuPositions { get; private set; }
+
+    public Choice<MenuPlacement> SelectedMenuPosition
+    {
+        get => MenuPositions.FirstOrDefault(p => p.Value == O.MenuPosition) ?? MenuPositions[0];
+        set
+        {
+            if (value is not null) Set(O.MenuPosition, value.Value, v => O.MenuPosition = v);
+        }
     }
 
     public RelayCommand PreviewCommand { get; }

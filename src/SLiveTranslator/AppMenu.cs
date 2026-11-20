@@ -56,7 +56,7 @@ public partial class App
         var area = GameArea();
         _menuKeys = _hotkeys?.Grab(MenuKeys());
         RefreshMenuItems();
-        _menu.ShowMenu(Loc.Instance["GameMenu.Title"], _menuItems, _menuCursor.Selected, MenuFooter(), area);
+        _menu.ShowMenu(Loc.Instance["GameMenu.Title"], _menuItems, _menuCursor.Selected, MenuFooter(), area, _settings.Overlay.MenuPosition);
         _menuOpenedOver = Native.GetForegroundWindow();
         _menuLast = WatchNow();
         _menuActivity = DateTime.UtcNow;

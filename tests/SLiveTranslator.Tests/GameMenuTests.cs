@@ -145,13 +145,31 @@ public class GameMenuTests
         Assert.Null(GameMenu.IndexOfDigit(11, 10));
     }
 
+    [Theory]
+    [InlineData(MenuPlacement.TopRight, 1476, 24)]
+    [InlineData(MenuPlacement.TopLeft, 24, 24)]
+    [InlineData(MenuPlacement.BottomRight, 1476, 576)]
+    [InlineData(MenuPlacement.BottomLeft, 24, 576)]
+    [InlineData(MenuPlacement.Center, 750, 300)]
+    public void The_menu_goes_where_the_setting_says_in_the_game_window(MenuPlacement placement, int x, int y) =>
+        Assert.Equal(new DPoint(x, y), GameMenu.Place(new DRect(0, 0, 1920, 1080), new DSize(420, 480), new DRect(0, 0, 1920, 1080), placement, 24));
+
     [Fact]
-    public void The_menu_goes_in_the_middle_of_the_game_window_and_stays_on_its_monitor()
+    public void By_default_the_menu_opens_top_right_and_stays_on_the_monitor()
     {
         var screen = new DRect(0, 0, 1920, 1080);
+        var size = new DSize(420, 480);
 
-        Assert.Equal(new DPoint(750, 300), GameMenu.Place(new DRect(0, 0, 1920, 1080), new DSize(420, 480), screen));
-        Assert.Equal(new DPoint(1500, 0), GameMenu.Place(new DRect(1600, -200, 600, 300), new DSize(420, 480), screen)); // window partly off screen
+        Assert.Equal(MenuPlacement.TopRight, new OverlaySettings().MenuPosition);
+        using var dir = new TempDir();
+        var vm = new SettingsViewModel(new FakeHost(dir.File("Profiles")), new FakeScheduler().Delay);
+        Assert.Equal(MenuPlacement.TopRight, vm.Overlay.SelectedMenuPosition.Value);
+        vm.Overlay.SelectedMenuPosition = vm.Overlay.MenuPositions.Single(p => p.Value == MenuPlacement.BottomLeft);
+        Assert.Equal(MenuPlacement.BottomLeft, vm.Working.Overlay.MenuPosition);
+        Assert.Equal("Bottom left", vm.Overlay.SelectedMenuPosition.Label);
+        Assert.Equal(new DPoint(1056, 324), GameMenu.Place(new DRect(200, 300, 1300, 700), size, screen, margin: 24)); // a smaller window: its own corner
+        Assert.Equal(new DPoint(1476, 24), GameMenu.Place(new DRect(1600, -200, 600, 300), size, screen, margin: 24)); // partly off screen: kept on it
+        Assert.Equal(new DPoint(1500, 600), GameMenu.Place(new DRect(-500, -500, 100, 100), size, screen, MenuPlacement.BottomRight)); // off screen: the monitor's corner
     }
 
     [Fact]

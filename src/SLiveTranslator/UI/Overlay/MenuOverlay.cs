@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using SLiveTranslator.Capture;
+using SLiveTranslator.Models;
 using DRect = System.Drawing.Rectangle;
 using Forms = System.Windows.Forms;
 
@@ -19,6 +20,9 @@ namespace SLiveTranslator.UI.Overlay;
 public sealed class MenuOverlay : ClickThroughWindow
 {
     const double PanelWidth = 420;
+
+    /// <summary>The space (DIPs) between the menu and the game window's edges in a corner.</summary>
+    const double EdgeMargin = 24;
 
     /// <summary>The pointer must move this far (px) after the menu opened before hovering selects: a parked cursor selects nothing.</summary>
     const int HoverAfter = 3;
@@ -79,14 +83,15 @@ public sealed class MenuOverlay : ClickThroughWindow
     /// <summary>Where the menu is on the screen (physical pixels), for a click outside it.</summary>
     public DRect BoundsPx => Native.GetWindowRect(Handle, out var r) ? r.ToRectangle() : DRect.Empty;
 
-    /// <summary>Shows the menu in the middle of <paramref name="areaPx"/> (the game window), kept on its monitor.</summary>
-    public void ShowMenu(string title, IReadOnlyList<GameMenuItem> items, int selected, string footer, DRect areaPx)
+    /// <summary>Shows the menu in a corner (or the middle) of <paramref name="areaPx"/>, the game window, kept on its monitor.</summary>
+    public void ShowMenu(string title, IReadOnlyList<GameMenuItem> items, int selected, string footer, DRect areaPx,
+        MenuPlacement placement = MenuPlacement.TopRight)
     {
         _title.Text = title;
         Update(items, selected, footer);
         double scale = ScaleAt(areaPx);
         var size = MeasureContent(scale);
-        var at = GameMenu.Place(areaPx, size, Forms.Screen.FromRectangle(areaPx).Bounds);
+        var at = GameMenu.Place(areaPx, size, Forms.Screen.FromRectangle(areaPx).Bounds, placement, (int)Math.Round(EdgeMargin * scale));
         _openedAt = Forms.Cursor.Position;
         _hoverArmed = false;
         _pressed = -1;

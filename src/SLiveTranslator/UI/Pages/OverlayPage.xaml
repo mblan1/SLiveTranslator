@@ -64,6 +64,16 @@
             <ui:ToggleSwitch IsChecked="{Binding ShowOriginal}"/>
         </ui:CardControl>
 
+        <ui:CardControl Icon="{ui:SymbolIcon Navigation24}" Margin="0,0,0,8">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [Overlay.MenuPosition], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Overlay.MenuPositionHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ComboBox Width="220" ItemsSource="{Binding MenuPositions}" SelectedItem="{Binding SelectedMenuPosition}" DisplayMemberPath="Label"/>
+        </ui:CardControl>
+
         <ui:CardControl Icon="{ui:SymbolIcon History24}" Margin="0,0,0,8">
             <ui:CardControl.Header>
                 <TextBlock Style="{StaticResource Body}" Text="{Binding [Overlay.HistoryLines], Source={x:Static l:Loc.Instance}}"/>

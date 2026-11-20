@@ -3,9 +3,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.Input;
 using SLiveTranslator.Diagnostics;
 using SLiveTranslator.Models;
+using SLiveTranslator.Updates;
 
 namespace SLiveTranslator.UI.Pages;
 
@@ -24,6 +26,7 @@ public sealed class GeneralViewModel : SettingsPageViewModel
         Languages = LanguageChoices();
         Themes = Choices<AppTheme>("Theme.");
         RunSetupCommand = new RelayCommand(() => root.Welcome.Open());
+        CheckUpdatesCommand = new AsyncRelayCommand(CheckUpdatesAsync);
         RepairStartup();
     }
 
@@ -80,6 +83,43 @@ public sealed class GeneralViewModel : SettingsPageViewModel
 
     public RelayCommand RunSetupCommand { get; }
 
+    public AsyncRelayCommand CheckUpdatesCommand { get; }
+
+    /// <summary>"Up to date · checked at 14:05", "Checking for updates…", or why the check failed.</summary>
+    public string UpdateStatus => UpdateStatusText(_host.LastUpdateCheck, _host.LastUpdateCheckTime, _host.CheckingForUpdate);
+
+    /// <summary>A build run from the source does not update itself: there is nothing to check.</summary>
+    public bool CanCheckUpdates => _host.LastUpdateCheck?.State != UpdateCheckState.Disabled && !_host.CheckingForUpdate;
+
+    internal static string UpdateStatusText(UpdateCheck? check, DateTime? at, bool checking)
+    {
+        if (checking) return Loc.Instance["General.UpdateChecking"];
+        string time = at?.ToString("t", Loc.Instance.Culture) ?? "";
+        return check?.State switch
+        {
+            null => Loc.Instance["General.UpdateNotChecked"],
+            UpdateCheckState.Disabled => Loc.Instance["General.UpdateDisabled"],
+            UpdateCheckState.UpToDate => Loc.F("General.UpdateUpToDate", AppInfo.Version, time),
+            UpdateCheckState.Available => Loc.F("General.UpdateAvailable", check.Update!.VersionText),
+            _ => Loc.F("General.UpdateFailed", time, check.Problem),
+        };
+    }
+
+    async Task CheckUpdatesAsync()
+    {
+        var check = _host.CheckForUpdatesAsync();
+        UpdateStateChanged(); // "Checking for updates…"
+        await check;
+        UpdateStateChanged();
+    }
+
+    /// <summary>A check started or ended (here or by the app's timer).</summary>
+    public void UpdateStateChanged()
+    {
+        OnPropertyChanged(nameof(UpdateStatus));
+        OnPropertyChanged(nameof(CanCheckUpdates));
+    }
+
     public string Version => AppInfo.Version;
     public string Runtime => AppInfo.Runtime;
     public string OsDescription => AppInfo.OsDescription;
@@ -93,6 +133,7 @@ public sealed class GeneralViewModel : SettingsPageViewModel
         OnPropertyChanged(nameof(StartWithWindows));
         OnPropertyChanged(nameof(DataFolder));
         OnPropertyChanged(nameof(OcrLanguages));
+        UpdateStateChanged();
     }
 
     /// <summary>The app's language changed: the lists are written again, the selection kept.</summary>
@@ -106,6 +147,7 @@ public sealed class GeneralViewModel : SettingsPageViewModel
         OnPropertyChanged(nameof(SelectedTheme));
         OnPropertyChanged(nameof(OcrLanguages));
         OnPropertyChanged(nameof(DataFolder));
+        OnPropertyChanged(nameof(UpdateStatus));
     }
 
     void RepairStartup()

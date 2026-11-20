@@ -15,6 +15,7 @@ using SLiveTranslator.Models;
 using SLiveTranslator.UI;
 using SLiveTranslator.UI.Overlay;
 using SLiveTranslator.UI.Pages;
+using SLiveTranslator.Updates;
 using DRect = System.Drawing.Rectangle;
 using Forms = System.Windows.Forms;
 
@@ -70,6 +71,7 @@ internal static class OverlaySelfTest
         await CheckPickerAsync(subtitleRegion, outDir, report, failures);
         await CheckMainWindowAsync(outDir, report, failures);
         Check(overlay, area, "after the main window", null, report, failures);
+        await CheckUpdateWindowAsync(outDir, report, failures);
 
         report.Add(failures.Count == 0 ? "PASS" : $"FAIL ({failures.Count})");
         report.AddRange(failures);
@@ -195,6 +197,77 @@ internal static class OverlaySelfTest
         foreach (var error in errors) failures.Add("main window: " + error);
         report.Add($"main window: {bindings.Messages.Count} binding errors");
         report.AddRange(bindings.Messages.Distinct().Select(m => "  binding: " + m));
+    }
+
+    /// <summary>
+    /// The update window with a sample release, dark and light, in each of its looks: ready, downloading and failed. Each
+    /// is saved as a picture, and none of its bindings may fail.
+    /// </summary>
+    static async Task CheckUpdateWindowAsync(string outDir, List<string> report, List<string> failures)
+    {
+        var bindings = new BindingErrors();
+        PresentationTraceSources.Refresh();
+        PresentationTraceSources.DataBindingSource.Switch.Level = SourceLevels.Warning;
+        PresentationTraceSources.DataBindingSource.Listeners.Add(bindings);
+        try
+        {
+            var update = new UpdateInfo(new Version(2, 1, 0, 0), "v2.1.0",
+                "## New\n* **Updates** – the app checks for a new version and installs it in a minute.\n* Faster OCR on bright scenes.\n\n" +
+                "| Hotkey | Action |\n| --- | --- |\n| `Ctrl+Shift+S` | Subtitles on/off |",
+                new Uri("https://github.com/" + UpdateFeed.Repository + "/releases/download/v2.1.0/" + UpdateFeed.AssetName), 200_482_816, null,
+                UpdateFeed.ReleasesPage, DateTimeOffset.Now);
+            foreach (bool dark in new[] { true, false })
+            {
+                string theme = dark ? "dark" : "light";
+                var vm = new UpdateViewModel(update, "2.0.0", new NoUpdateActions());
+                var window = new UpdateWindow(vm, dark) { ShowActivated = false };
+                try
+                {
+                    window.Show();
+                    await Task.Delay(300);
+                    SaveRendering(window, Path.Combine(outDir, $"selftest_update_{theme}_ready.png"));
+                    vm.ShowSample(new DownloadProgress(87_400_000, update.Size, 3_600_000));
+                    await Task.Delay(200);
+                    SaveRendering(window, Path.Combine(outDir, $"selftest_update_{theme}_downloading.png"));
+                    vm.ShowSampleProblem(UpdateProblem.Network, "No such host is known.");
+                    await Task.Delay(200);
+                    SaveRendering(window, Path.Combine(outDir, $"selftest_update_{theme}_failed.png"));
+                    report.Add($"update window ({theme}): visible={window.IsVisible} size={window.ActualWidth:0}x{window.ActualHeight:0}");
+                    if (!window.IsVisible) failures.Add($"the update window ({theme}) did not show");
+                }
+                finally
+                {
+                    window.Close();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            failures.Add("update window: " + ex.GetType().Name + ": " + ex.Message);
+        }
+        finally
+        {
+            PresentationTraceSources.DataBindingSource.Listeners.Remove(bindings);
+        }
+        report.Add($"update window: {bindings.Messages.Count} binding errors");
+        foreach (var message in bindings.Messages.Distinct()) failures.Add("update window binding: " + message);
+    }
+
+    sealed class NoUpdateActions : IUpdateActions
+    {
+        public Task DownloadAsync(UpdateInfo update, IProgress<DownloadProgress> progress, System.Threading.CancellationToken ct) => Task.CompletedTask;
+
+        public void InstallAndRestart()
+        {
+        }
+
+        public void OpenPage(Uri page)
+        {
+        }
+
+        public void Quit()
+        {
+        }
     }
 
     static IEnumerable<DependencyObject> VisualDescendants(DependencyObject parent)

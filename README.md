@@ -19,8 +19,9 @@ Ciri: ta/cháu, Geralt and Yennefer: anh/em), and common machine-translation mis
 
 ## Install
 
-1. Download `SLiveTranslator.exe` (one file, about 190 MB, no .NET install needed) and put it in any folder. It
-   uses about 60 MB of memory while it waits in the tray.
+1. Download `SLiveTranslator.exe` (one file, about 190 MB, no .NET install needed) and put it in a folder you can
+   write to (Documents, a Games folder; not Program Files), so it can update itself. It uses about 60 MB of memory
+   while it waits in the tray.
 2. Run it. It lives in the system tray (the blue speech-bubble icon; a green dot means subtitles are on).
 3. The first start opens a short setup: language of the app, translation service, subtitle region, and
    a hotkey test. Everything can be changed later in the main window (double-click the tray icon).
@@ -80,6 +81,19 @@ The *Subtitles* group of the main window has four pages:
   reading speed, or until the next line), the shortest time on screen, fade in and out, a time-left bar,
   whether a new line pushes the older ones up or replaces them, and what Clear does.
 * **Reading & OCR** – how often and how the region is read.
+
+### Updates
+
+The app looks for a new version on GitHub when it starts and every 6 hours. A new version must be installed
+before the app can be used again: subtitles stop, and the hotkeys, the tray and the main window bring up the
+*Update required* window. It shows both versions, the download size and what is new; **Update now** downloads it
+with a progress bar (size, percent, speed, time left), puts it in place of the old exe and restarts. Settings, the
+translation cache and the history are kept; the old exe and its unpacked files in `%TEMP%\.net` are deleted after
+the update. *Quit* (or closing the window) exits.
+
+The download is checked before it is used: its size, its SHA-256 (from the release), and its version. When GitHub
+cannot be reached, nothing changes and the app tries again an hour later. *General & About › Updates* shows the
+last check and checks now. Only the published exe updates itself, not a build run from the source.
 
 ## Translation services
 
@@ -150,6 +164,21 @@ It writes `dist\SLiveTranslator.exe` (self-contained, win-x64, profile
 The icon is drawn by a small tool, not part of the solution: `dotnet run --project tools/IconGen` writes
 `src/SLiveTranslator/Assets/app.ico` (see `tools/IconGen/README.md`).
 
+### Publishing a release
+
+Every running copy older than the latest release must update to it, so a release has to be right:
+
+1. Raise `<Version>` in `src/SLiveTranslator/SLiveTranslator.csproj` (for example to `2.1.0`) and commit.
+2. Run `.\publish.ps1`.
+3. Create a GitHub release with the tag `v` + that version (`v2.1.0`), not a draft or pre-release, and attach
+   `dist\SLiveTranslator.exe` under exactly that name.
+
+An exe whose version is lower than its tag is refused by the updater (otherwise it would update for ever), so
+skipping step 1 leaves every user on the *Update required* window until the release is fixed. Drafts and
+pre-releases are never offered. To try an update on this PC without publishing, serve a release JSON and an exe
+from `http://127.0.0.1:<port>/` and start the app with `SLT_UPDATE_FEED` set to the JSON's address (only loopback
+addresses are taken).
+
 ### Diagnostics
 
 ```
@@ -172,6 +201,8 @@ screen region ─► Windows OCR (plain + white-text mask) ─► subtitle track
   `FallbackTranslator` (next service on failure), `CachedTranslator` (hand fixes win) and `ProviderRegistry`.
 * `UI/` – the click-through overlays (`Overlay/`), the main window and its pages (`Pages/`), the notifier
   surface and the English/Vietnamese strings (`Loc`, `Assets/Strings`).
+* `Updates/` – the GitHub release check (`UpdateFeed`), the checked download (`UpdateDownloader`) and the swap of
+  the running exe with the cleanup after it (`UpdateInstaller`); `AppUpdates.cs` ties them to the app.
 
 ## Known limitations
 
@@ -198,3 +229,7 @@ bằng OCR có sẵn của Windows, dịch, rồi hiện bản dịch trên mộ
 * **The Witcher 3:** có sẵn hồ sơ giữ nguyên tên riêng và thuật ngữ, xưng hô nhất quán. Dòng dịch sai có thể
   sửa tay trong lịch sử hoặc trong trang *Lưu trữ & bộ nhớ đệm*; bản sửa tay luôn được ưu tiên.
 * **Dữ liệu:** nằm ở `%APPDATA%\SLiveTranslator`. Đặt tệp `portable.flag` cạnh exe để lưu dữ liệu ngay bên cạnh.
+* **Cập nhật:** ứng dụng kiểm tra phiên bản mới trên GitHub khi khởi động và mỗi 6 giờ. Khi có bản mới, phải cập nhật
+  mới dùng tiếp được: cửa sổ *Cần cập nhật* cho biết dung lượng tải, thanh tiến trình, rồi ứng dụng tự khởi động lại
+  và xóa phiên bản cũ. Cài đặt, bộ nhớ đệm và lịch sử được giữ nguyên. Hãy để exe ở thư mục có quyền ghi (không phải
+  Program Files).

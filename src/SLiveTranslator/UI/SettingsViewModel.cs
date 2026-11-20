@@ -191,7 +191,11 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
         Home.Refresh();
     }
 
-    void OnStateChanged(object? sender, EventArgs e) => Home.Refresh();
+    void OnStateChanged(object? sender, EventArgs e)
+    {
+        Home.Refresh();
+        General.UpdateStateChanged();
+    }
 
     /// <summary>The texts bound by key follow by themselves; the lists and texts the pages made are made again in the new language.</summary>
     void OnLanguageChanged(object? sender, PropertyChangedEventArgs e)

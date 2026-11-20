@@ -37,7 +37,7 @@
             <ui:ToggleSwitch IsChecked="{Binding StartWithWindows}"/>
         </ui:CardControl>
 
-        <ui:CardControl Icon="{ui:SymbolIcon Wrench24}" Margin="0,0,0,16">
+        <ui:CardControl Icon="{ui:SymbolIcon Wrench24}" Margin="0,0,0,8">
             <ui:CardControl.Header>
                 <StackPanel>
                     <TextBlock Style="{StaticResource Body}" Text="{Binding [General.Setup], Source={x:Static l:Loc.Instance}}"/>
@@ -46,6 +46,17 @@
             </ui:CardControl.Header>
             <ui:Button Icon="{ui:SymbolIcon PlayCircle24}" Command="{Binding RunSetupCommand}"
                        Content="{Binding [General.SetupButton], Source={x:Static l:Loc.Instance}}"/>
+        </ui:CardControl>
+
+        <ui:CardControl Icon="{ui:SymbolIcon ArrowSync24}" Margin="0,0,0,16">
+            <ui:CardControl.Header>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource Body}" Text="{Binding [General.Updates], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding UpdateStatus}"/>
+                </StackPanel>
+            </ui:CardControl.Header>
+            <ui:Button Icon="{ui:SymbolIcon ArrowSync24}" Command="{Binding CheckUpdatesCommand}" IsEnabled="{Binding CanCheckUpdates}"
+                       Content="{Binding [General.CheckUpdates], Source={x:Static l:Loc.Instance}}"/>
         </ui:CardControl>
 
         <Border Style="{StaticResource Card}">

@@ -22,6 +22,7 @@ using SLiveTranslator.Translation.Providers;
 using SLiveTranslator.UI;
 using SLiveTranslator.UI.Overlay;
 using SLiveTranslator.UI.Pages;
+using SLiveTranslator.Updates;
 using Drawing = System.Drawing;
 using DRect = System.Drawing.Rectangle;
 using Forms = System.Windows.Forms;
@@ -102,6 +103,9 @@ public partial class App : Application, ISettingsHost
             return;
         }
 
+        // After an update the old copy is still ending: it let go of the mutex, and its exe can be deleted once it is gone.
+        if (start.UpdatedFrom is int oldCopy and > 0) UpdateInstaller.WaitForExit(oldCopy);
+
         // A second copy cannot get the hotkeys and only causes confusion.
         _singleInstance = new Mutex(true, InstanceMutexName, out bool firstInstance);
         if (!firstInstance)
@@ -143,6 +147,13 @@ public partial class App : Application, ISettingsHost
 
         // Shown before the first-run window, so a reset to defaults is explained before the user saves over it.
         ShowProblems(problems);
+        StartUpdates(updated: start.UpdatedFrom is not null);
+        if (start.UpdatedFrom is not null)
+        {
+            Log.Write("update: now running " + AppInfo.Version);
+            _notifier.Feedback(NoticeCategory.Status, Loc.F("Notice.Updated", AppInfo.Version), Forms.Screen.PrimaryScreen?.Bounds);
+            return;
+        }
         if (start.Quiet) return; // started with Windows: in the tray, without the "running" notices
         if (!_settings.General.FirstRunDone)
         {
@@ -319,6 +330,7 @@ public partial class App : Application, ISettingsHost
 
     void OnTrayCommand(TrayItem item)
     {
+        if (item.Command != TrayCommand.Exit && UpdateBlocks()) return;
         switch (item.Command)
         {
             case TrayCommand.Subtitles: ToggleSubtitles(); break;
@@ -403,6 +415,7 @@ public partial class App : Application, ISettingsHost
     /// </summary>
     Action OnHotkey(HotkeyAction action, Action run) => () =>
     {
+        if (UpdateBlocks()) return;
         HotkeyPressed?.Invoke(this, action);
         if (!(_hotkeyTrial && _mainWindow is { IsActive: true })) run();
     };
@@ -661,6 +674,7 @@ public partial class App : Application, ISettingsHost
     /// <param name="welcome">Opens the first-run wizard over it.</param>
     void ShowMainWindow(bool welcome = false)
     {
+        if (UpdateBlocks()) return;
         if (_mainWindow is { } open)
         {
             if (open.WindowState == WindowState.Minimized) open.WindowState = WindowState.Normal;
@@ -692,9 +706,13 @@ public partial class App : Application, ISettingsHost
     /// <summary>Exit from the tray: unsaved edits in the main window are dropped without asking (WPF closes it on shutdown).</summary>
     void ExitApp()
     {
+        if (_exiting) return; // the windows closed by the shutdown would ask again (the update window quits when closed)
+        _exiting = true;
         if (_mainWindow is not null) SkipUnsavedQuestion(_mainWindow);
         Shutdown();
     }
+
+    bool _exiting;
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     static void SkipUnsavedQuestion(Window window) => ((UI.MainWindow)window).SkipUnsavedQuestion = true;
@@ -935,14 +953,9 @@ public partial class App : Application, ISettingsHost
         SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>The new copy needs the hotkeys and the single-instance mutex, so this one lets go of them before starting it.</summary>
     void ISettingsHost.Restart()
     {
-        _hotkeys?.Dispose();
-        _hotkeys = null;
-        _singleInstance?.ReleaseMutex();
-        _singleInstance?.Dispose();
-        _singleInstance = null;
+        ReleaseInstance();
         try
         {
             Process.Start(new ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false });
@@ -950,12 +963,28 @@ public partial class App : Application, ISettingsHost
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
         {
             Log.Error("restart: " + ex.Message);
-            _singleInstance = new Mutex(true, InstanceMutexName, out _);
-            RegisterHotkeys();
+            ReacquireInstance();
             _notifier.Feedback(NoticeCategory.Error, Loc.F("Notice.RestartFailed", ex.Message));
             return;
         }
         ExitApp();
+    }
+
+    /// <summary>A new copy (a restart, an update) needs the hotkeys and the single-instance mutex: this one lets go of them before starting it.</summary>
+    void ReleaseInstance()
+    {
+        _hotkeys?.Dispose();
+        _hotkeys = null;
+        _singleInstance?.ReleaseMutex();
+        _singleInstance?.Dispose();
+        _singleInstance = null;
+    }
+
+    /// <summary>The new copy did not start: this one takes the mutex and the hotkeys back.</summary>
+    void ReacquireInstance()
+    {
+        _singleInstance = new Mutex(true, InstanceMutexName, out _);
+        RegisterHotkeys();
     }
 
     void ISettingsHost.OpenFolder(string path) => OpenFolder(path);

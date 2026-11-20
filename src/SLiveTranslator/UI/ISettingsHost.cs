@@ -7,6 +7,7 @@ using SLiveTranslator.Models;
 using SLiveTranslator.Services;
 using SLiveTranslator.Translation;
 using SLiveTranslator.Translation.Providers;
+using SLiveTranslator.Updates;
 
 namespace SLiveTranslator.UI;
 
@@ -138,6 +139,16 @@ public interface ISettingsHost
 
     /// <summary>Shows the app in this language at once, without saving it (the welcome wizard's first step); "" follows Windows.</summary>
     void ApplyLanguage(string setting);
+
+    /// <summary>The last check for an update; null before the first one ended, <see cref="UpdateCheck.Disabled"/> for a build that does not update itself.</summary>
+    UpdateCheck? LastUpdateCheck => UpdateCheck.Disabled;
+
+    DateTime? LastUpdateCheckTime => null;
+
+    bool CheckingForUpdate => false;
+
+    /// <summary>Checks now; a newer version brings up the update window (and closes the main window).</summary>
+    Task<UpdateCheck> CheckForUpdatesAsync() => Task.FromResult(UpdateCheck.Disabled);
 
     // ---- history ----
 

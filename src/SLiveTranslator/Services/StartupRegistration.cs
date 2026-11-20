@@ -98,17 +98,34 @@ public sealed class StartupRegistration(IRegistry registry, string? exePath)
 /// <param name="Cli">The arguments of a CLI mode ("--selftest dir"); null for a normal start.</param>
 public sealed record StartupArgs(bool Quiet, string[]? Cli)
 {
-    /// <summary>"--startup" is taken out first, so it never reaches the "--" CLI branch as an unknown option.</summary>
+    /// <summary>
+    /// Started by an update ("--updated &lt;id&gt;", see <see cref="Updates.UpdateInstaller"/>): the id of the old copy,
+    /// which this one waits for before it deletes the old exe.
+    /// </summary>
+    public int? UpdatedFrom { get; init; }
+
+    /// <summary>"--startup" and "--updated &lt;id&gt;" are taken out first, so they never reach the "--" CLI branch as unknown options.</summary>
     public static StartupArgs Parse(string[] args)
     {
         bool quiet = false;
+        int? updatedFrom = null;
         var rest = new List<string>();
-        foreach (var arg in args)
+        for (int i = 0; i < args.Length; i++)
         {
+            string arg = args[i];
             if (arg.Equals(StartupRegistration.Argument, StringComparison.OrdinalIgnoreCase)) quiet = true;
+            else if (arg.Equals(Updates.UpdateInstaller.UpdatedArgument, StringComparison.OrdinalIgnoreCase))
+            {
+                if (i + 1 < args.Length && int.TryParse(args[i + 1], out int id))
+                {
+                    updatedFrom = id;
+                    i++;
+                }
+                else updatedFrom = 0;
+            }
             else rest.Add(arg);
         }
         bool cli = rest.Count > 0 && rest[0].StartsWith("--", StringComparison.Ordinal);
-        return new StartupArgs(quiet, cli ? rest.ToArray() : null);
+        return new StartupArgs(quiet, cli ? rest.ToArray() : null) { UpdatedFrom = updatedFrom };
     }
 }

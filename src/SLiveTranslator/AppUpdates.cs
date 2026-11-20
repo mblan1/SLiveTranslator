@@ -167,6 +167,7 @@ public partial class App : IUpdateActions
             Log.Write($"update: {update.Tag} ({update.Size:N0} bytes) is out; {AppInfo.Version} cannot be used until it is installed");
             _screenCts?.Cancel();
             _previewTimer?.Stop();
+            CloseMenu();
             StopSubtitles();
             _overlay?.ClearLabels();
             _presenter?.HideHistory();

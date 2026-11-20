@@ -209,7 +209,7 @@ public class DiagnosticsAndTrayTests
         var cache = new CachedTranslator(new EchoTranslator(), dir.File(@"Old\cache.json"), 1000, TimeSpan.FromHours(1));
         cache.SetUserOverride("en", "vi", "Roach", "Roach");
         cache.Flush();
-        var profiles = new GameProfileStore(dir.File(@"Old\Profiles"));
+        var profiles = TestProfiles.Store(dir.File(@"Old\Profiles"));
         var witcher = profiles.Find("witcher3")!;
         Directory.CreateDirectory(dir.File(@"New\Profiles"));
         foreach (var file in Directory.EnumerateFiles(dir.File(@"Old\Profiles")))

@@ -158,7 +158,7 @@ sealed class FakeHost(string profilesDir, params ITranslationProvider[] provider
     public void RaiseStateChanged() => StateChanged?.Invoke(this, EventArgs.Empty);
 
     public IReadOnlyList<ITranslationProvider> Providers { get; } = providers;
-    public GameProfileStore Profiles { get; } = new(profilesDir);
+    public GameProfileStore Profiles { get; } = TestProfiles.Store(profilesDir);
 
     public AppSettings? Tested { get; private set; }
 
@@ -174,6 +174,15 @@ sealed class FakeHost(string profilesDir, params ITranslationProvider[] provider
     public FreeServiceStatus FreeServices { get; set; } = new(null, 0, 5_000);
     public int RegionSelections { get; private set; }
     public void SelectRegion() => RegionSelections++;
+
+    /// <summary>The settings each page-started pick began from (a copy, as the app clones them).</summary>
+    public List<AppSettings> PickedWith { get; } = new();
+
+    public void SelectRegions(RegionPickMode mode, AppSettings working)
+    {
+        RegionSelections++;
+        PickedWith.Add(SettingsStore.Clone(working));
+    }
 
     public void TranslateScreen()
     {
@@ -269,6 +278,14 @@ sealed class FakeHost(string profilesDir, params ITranslationProvider[] provider
     public (string Src, string Tgt) Languages => ("en", "vi");
     public List<(string Source, string Translation)> Fixes { get; } = new();
     public void ShowFix(string source, string translation) => Fixes.Add((source, translation));
+    public void RemoveHistory(int id) => History.RemoveAll(r => r.Id == id);
+    public int HistoryClears { get; private set; }
+
+    public void ClearHistory()
+    {
+        History.Clear();
+        HistoryClears++;
+    }
 }
 
 static class SettingsUi

@@ -144,7 +144,8 @@
                             <TextBlock Style="{StaticResource Body}" Text="{Binding [Region.Preset.BottomCenter], Source={x:Static l:Loc.Instance}}"/>
                         </StackPanel>
                     </RadioButton>
-                    <RadioButton GroupName="Place" Margin="0,0,16,8" IsChecked="{Binding PlaceOver}">
+                    <RadioButton GroupName="Place" Margin="0,0,16,8" IsChecked="{Binding PlaceOver}" IsEnabled="{Binding CanPlaceOver}"
+                                 ToolTipService.ShowOnDisabled="True" ToolTip="{Binding [Regions.OverOffShared], Source={x:Static l:Loc.Instance}}">
                         <StackPanel>
                             <Border Width="96" Height="54" Background="{StaticResource ScreenSky}" CornerRadius="3" Margin="0,0,0,4">
                                 <Canvas>
@@ -249,6 +250,8 @@
                 </DockPanel>
 
                 <ui:InfoBar IsOpen="True" IsClosable="False" Message="{Binding OverlapText}" Severity="{Binding OverlapKind, Converter={StaticResource SeverityOf}}"/>
+                <ui:InfoBar Margin="0,8,0,0" IsOpen="True" IsClosable="False" Severity="Warning" Message="{Binding KeptOffText}"
+                            Visibility="{Binding KeptOffText, Converter={StaticResource VisibleWhen}}"/>
             </StackPanel>
         </Border>
     </StackPanel>

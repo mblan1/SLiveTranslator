@@ -36,6 +36,7 @@ public sealed class DisplayViewModel : SettingsPageViewModel
     {
         if (!chosen) return;
         Set(O.DisplayMode, mode, v => O.DisplayMode = v, nameof(O.DisplayMode));
+        KeepOffRead();
         Reload();
     }
 
@@ -45,9 +46,32 @@ public sealed class DisplayViewModel : SettingsPageViewModel
         set
         {
             Set(O.Share.Subtitles, value, v => O.Share.Subtitles = v);
+            KeepOffRead();
+            OnPropertyChanged(nameof(PlacementText));
             OnPropertyChanged(nameof(PlacementStatus));
             OnPropertyChanged(nameof(PlacementKind));
+            OnPropertyChanged(nameof(MovedNote));
         }
+    }
+
+    string _movedNote = "";
+
+    /// <summary>What switching to Shared on screen moved off the read region; "" when nothing moved.</summary>
+    public string MovedNote => _movedNote;
+
+    /// <summary>
+    /// Shared on screen with the subtitles shared: a translation placed on the read region moves off it now (the app's
+    /// own OCR would read it), and the page says so. Saved with the rest.
+    /// </summary>
+    void KeepOffRead()
+    {
+        _movedNote = "";
+        if (Working.Subtitles.Region is not { } read) return;
+        var fix = Overlay.RegionRules.Enforce(O, read, System.Windows.Forms.Screen.FromRectangle(read.ToRectangle()).Bounds);
+        if (fix == Overlay.PlacementFix.None) return;
+        _movedNote = Overlay.RegionRules.NoticeFor(fix);
+        Root.Edited();
+        Root.Regions.Reload();
     }
 
     public bool ShareHistory

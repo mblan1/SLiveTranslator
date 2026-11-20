@@ -2,7 +2,8 @@ using System.Collections.Generic;
 
 namespace SLiveTranslator.Models;
 
-public enum HotkeyAction { TranslateScreen, ToggleSubtitles, SelectRegion, Clear, History, SwitchDisplayMode }
+/// <summary>New actions go at the end: registration runs in this order, so of two with one gesture the earlier keeps it.</summary>
+public enum HotkeyAction { TranslateScreen, ToggleSubtitles, SelectRegion, Clear, History, SwitchDisplayMode, Menu }
 
 public sealed class HotkeySettings : SettingsSection
 {
@@ -14,6 +15,8 @@ public sealed class HotkeySettings : SettingsSection
         [HotkeyAction.Clear] = "Ctrl+Shift+X",
         [HotkeyAction.History] = "Ctrl+Shift+H",
         [HotkeyAction.SwitchDisplayMode] = "Ctrl+Shift+P",
+        // Not Ctrl+Shift+M: Discord's mute toggle, which would fire too (it hooks the keyboard).
+        [HotkeyAction.Menu] = "Ctrl+Shift+O",
     };
 
     /// <summary>Gesture per action, e.g. "Ctrl+Shift+T".</summary>

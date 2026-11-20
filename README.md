@@ -13,9 +13,11 @@ Nothing is injected into the game.
 * **Translate screen** – one hotkey translates every piece of text in the game window (tooltips, item
   names, menus), each label drawn over its original.
 
-It ships with a profile for **The Witcher 3** (English → Vietnamese): names and game terms (Geralt, Ciri,
-Roach, witcher, ghoul, Kaer Morhen …) are kept, characters address each other consistently (Vesemir and
-Ciri: ta/cháu, Geralt and Yennefer: anh/em), and common machine-translation mistakes are corrected.
+* **In-game menu** – one hotkey opens every function over the game (subtitles, regions, clear, font size …),
+  worked by clicks or the number keys while the game keeps the focus.
+
+A **game profile** keeps a game's names and terms, fixes its machine-translation mistakes and tells AI services who
+speaks to whom. None ships with the app: make one for your game on the *Game profile* page, or import one.
 
 ## Install
 
@@ -45,9 +47,19 @@ Requirements:
 | `Ctrl+Shift+H` | Dialog history on/off                                                  |
 | `Ctrl+Shift+X` | Clear the text; subtitles stay on (the *Timing* page can make it stop them too) |
 | `Ctrl+Shift+P` | Private overlay ↔ Shared on screen (see below)                         |
+| `Ctrl+Shift+O` | In-game menu with every function (see below)                           |
 
 Every hotkey can be recorded anew, switched off or reset on the *Hotkeys* page. A hotkey another program
 already uses is shown as *In use* instead of silently not working.
+
+### In-game menu
+
+`Ctrl+Shift+O` opens a menu in the middle of the game window: subtitles on/off, select regions, clear text,
+translate screen, dialog history, Private ↔ Shared, font size − / +, mute notices, settings and quit, each with
+its own hotkey shown. It never takes the focus from the game, so subtitles keep running: click a row, or use
+↑ ↓ and Enter, the number keys 1–9 and 0, and ← → for the font size (shown at once, then saved). Esc, the hotkey again, a
+click outside it or 30 s without use close it; Quit asks to be picked twice. While it is open it holds those
+keys, so the game does not get them (a game that reads raw input may still see them).
 
 Typical flow:
 
@@ -75,8 +87,10 @@ The *Subtitles* group of the main window has four pages:
   recordings and screenshots: only you see it. *Shared on screen* makes it part of the screen, so people in
   Discord, Teams, Meet or OBS see it too; you choose which parts (subtitles, history, translate-screen labels,
   notices). Viewers see it when you share the **whole screen**: a share of only the game window leaves it out.
-  In shared mode the translation must keep off the read region (the app's own OCR would read it), so a place
-  that covers the region moves above it. The main window stays out of screen sharing unless switched off here.
+  In Private overlay the two boxes may overlap. In shared mode the translation must keep off the read region
+  (the app's own OCR would read it): when you draw, move or type the display box it stops at the read region's
+  edge, *Over the original* is not offered, and switching to Shared moves a translation that covers the region
+  above it (below when there is no room). The main window stays out of screen sharing unless switched off here.
 * **Timing** – how long a line stays after the game hides it (a fixed time, by the line's length at your
   reading speed, or until the next line), the shortest time on screen, fade in and out, a time-left bar,
   whether a new line pushes the older ones up or replaces them, and what Clear does.
@@ -88,8 +102,8 @@ The app looks for a new version on GitHub when it starts and every 6 hours. A ne
 before the app can be used again: subtitles stop, and the hotkeys, the tray and the main window bring up the
 *Update required* window. It shows both versions, the download size and what is new; **Update now** downloads it
 with a progress bar (size, percent, speed, time left), puts it in place of the old exe and restarts. Settings, the
-translation cache and the history are kept; the old exe and its unpacked files in `%TEMP%\.net` are deleted after
-the update. *Quit* (or closing the window) exits.
+translation cache and the game profiles are kept; the old exe and its unpacked files in `%TEMP%\.net` are deleted
+after the update. *Quit* (or closing the window) exits.
 
 The download is checked before it is used: its size, its SHA-256 (from the release), and its version. When GitHub
 cannot be reached, nothing changes and the app tries again an hour later. *General & About › Updates* shows the
@@ -123,15 +137,21 @@ Only the text being translated is sent, and only to the service you chose.
 
 ## Game profile and fixing translations
 
-The *Game profile* page edits the profile in use (chosen automatically from the game's process):
+The *Game profile* page makes, imports, exports, clears and removes profiles, and edits the one in use (chosen
+automatically from the game's process):
 
 * **Keep** – names and terms that stay as they are.
 * **Glossary** – fixed translations of game terms.
 * **Characters** – who speaks to whom and the forms of address (for AI services).
 * **Fix rules** – corrections applied to machine translations, with optional "unless" words.
 
+*Clear* empties a profile's lists and keeps its name and games; *Remove profile* deletes its file (export it first
+to keep a copy). The Witcher 3 profile that 2.0 shipped is deleted if you never changed it.
+
 A line translated wrong can be fixed by hand: in the main window's history, or in the cache manager on
-the *Storage & cache* page. A fixed line always wins, for every service.
+the *Storage & cache* page. A fixed line always wins, for every service. The history holds the lines of this
+session (it starts empty at each start); *Remove line* and *Clear history* take lines out of it, and the
+translation cache keeps their translations.
 
 ## Data folder
 
@@ -210,6 +230,10 @@ screen region ─► Windows OCR (plain + white-text mask) ─► subtitle track
 * The free Google endpoint is unofficial and blocks some networks; the app then pauses it and uses MyMemory.
 * Mixed-DPI multi-monitor setups are supported in principle but were only checked at 100 %.
 
+## Author
+
+Snw
+
 ## Tiếng Việt
 
 SLiveTranslator dịch chữ trong game ngay trên màn hình: phụ đề, chú thích vật phẩm, menu. Ứng dụng đọc chữ
@@ -222,14 +246,19 @@ bằng OCR có sẵn của Windows, dịch, rồi hiện bản dịch trên mộ
   rồi vùng hiện bản dịch cùng nền của nó (mặc định trong suốt, chữ có viền), `Ctrl+Shift+S` bật/tắt phụ đề,
   `Ctrl+Shift+T` dịch cả màn hình, `Ctrl+Shift+H` xem lịch sử hội thoại, `Ctrl+Shift+X` xóa chữ (phụ đề vẫn
   bật), `Ctrl+Shift+P` đổi giữa *Lớp phủ riêng* (chỉ bạn thấy) và *Hiện trên màn hình chia sẻ* (người xem khi
-  bạn chia sẻ cả màn hình cũng thấy). Bản dịch ở lại bao lâu, hiện/mờ dần ra sao: trang *Phụ đề › Thời gian*.
+  bạn chia sẻ cả màn hình cũng thấy; khi đó vùng hiện bản dịch không được che vùng đọc), `Ctrl+Shift+O` mở menu
+  trong game với mọi chức năng (bấm chuột hoặc phím số, game vẫn giữ focus). Bản dịch ở lại bao lâu, hiện/mờ dần
+  ra sao: trang *Phụ đề › Thời gian*.
 * **Dịch vụ:** mặc định là dịch miễn phí (Google, rồi MyMemory). Có thể dùng Claude, OpenAI, Gemini (có gói miễn
   phí), DeepL, Microsoft hoặc Google Cloud: nhập khóa API, ứng dụng kiểm tra ngay rồi mới hiện danh sách mô hình.
   Khóa được mã hóa cho tài khoản Windows của bạn.
-* **The Witcher 3:** có sẵn hồ sơ giữ nguyên tên riêng và thuật ngữ, xưng hô nhất quán. Dòng dịch sai có thể
-  sửa tay trong lịch sử hoặc trong trang *Lưu trữ & bộ nhớ đệm*; bản sửa tay luôn được ưu tiên.
+* **Hồ sơ trò chơi:** giữ nguyên tên riêng và thuật ngữ, sửa lỗi dịch máy, xưng hô nhất quán. Ứng dụng không kèm
+  sẵn hồ sơ nào: tạo mới hoặc nhập ở trang *Hồ sơ trò chơi* (có cả Làm trống và Xóa hồ sơ). Dòng dịch sai có thể
+  sửa tay trong lịch sử hoặc trong trang *Lưu trữ & bộ nhớ đệm*; bản sửa tay luôn được ưu tiên. Lịch sử chỉ giữ
+  các dòng của phiên này; có thể xóa từng dòng hoặc xóa hết.
 * **Dữ liệu:** nằm ở `%APPDATA%\SLiveTranslator`. Đặt tệp `portable.flag` cạnh exe để lưu dữ liệu ngay bên cạnh.
 * **Cập nhật:** ứng dụng kiểm tra phiên bản mới trên GitHub khi khởi động và mỗi 6 giờ. Khi có bản mới, phải cập nhật
   mới dùng tiếp được: cửa sổ *Cần cập nhật* cho biết dung lượng tải, thanh tiến trình, rồi ứng dụng tự khởi động lại
-  và xóa phiên bản cũ. Cài đặt, bộ nhớ đệm và lịch sử được giữ nguyên. Hãy để exe ở thư mục có quyền ghi (không phải
-  Program Files).
+  và xóa phiên bản cũ. Cài đặt, bộ nhớ đệm và hồ sơ trò chơi được giữ nguyên. Hãy để exe ở thư mục có quyền ghi
+  (không phải Program Files).
+* **Tác giả:** Snw

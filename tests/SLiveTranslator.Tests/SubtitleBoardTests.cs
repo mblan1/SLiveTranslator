@@ -7,6 +7,30 @@ namespace SLiveTranslator.Tests;
 public class SubtitleBoardTests
 {
     [Fact]
+    public void A_removed_line_leaves_the_history_and_says_whether_it_was_on_screen()
+    {
+        var board = new SubtitleBoard();
+        board.Detected(1, "One.", false);
+        board.Translated(1, "Một.", false, 3);
+        board.CloseWindow(); // line 1 is in the history only now
+        board.Detected(2, "Two.", false);
+        board.Translated(2, "Hai.", false, 3);
+        board.Detected(3, "Three.", false);
+        board.Translated(3, "Ba.", false, 3);
+
+        Assert.True(board.Remove(1, out bool firstOnScreen));
+        Assert.False(firstOnScreen);
+        Assert.Equal(["Hai.", "Ba."], board.Visible(3).Select(v => v.Text)); // the box keeps its lines
+
+        Assert.True(board.Remove(3, out bool lastOnScreen));
+        Assert.True(lastOnScreen);
+        Assert.Equal(["Hai."], board.Visible(3).Select(v => v.Text));
+        Assert.Equal([2], board.Records(10).Select(r => r.Id));
+        Assert.False(board.Remove(3, out _));
+        Assert.False(board.Translated(3, "late", false, 3)); // a late translation of a removed line goes nowhere
+    }
+
+    [Fact]
     public void A_new_line_waits_for_its_translation()
     {
         var board = new SubtitleBoard();

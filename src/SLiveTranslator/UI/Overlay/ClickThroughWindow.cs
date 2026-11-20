@@ -22,9 +22,19 @@ public class ClickThroughWindow : Window
     static readonly Style[] PlainStyles = [Sealed(typeof(TextBlock)), Sealed(typeof(Border)), Sealed(typeof(StackPanel)), Sealed(typeof(Canvas))];
 
     DPoint? _placedAt;
+    readonly bool _clickThrough;
 
-    public ClickThroughWindow()
+    public ClickThroughWindow() : this(clickThrough: true)
     {
+    }
+
+    /// <param name="clickThrough">
+    /// False for a window that takes clicks (the in-game menu): still never activated, so the game stays in front and
+    /// keeps the keyboard. Nothing in it may take the focus either (no WPF Buttons: they focus themselves on a click).
+    /// </param>
+    protected ClickThroughWindow(bool clickThrough)
+    {
+        _clickThrough = clickThrough;
         WindowStyle = WindowStyle.None;
         AllowsTransparency = true;
         Background = Brushes.Transparent;
@@ -33,7 +43,7 @@ public class ClickThroughWindow : Window
         ShowActivated = false;
         ResizeMode = ResizeMode.NoResize;
         Focusable = false;
-        IsHitTestVisible = false;
+        IsHitTestVisible = !clickThrough;
         WindowStartupLocation = WindowStartupLocation.Manual;
         SizeToContent = SizeToContent.WidthAndHeight;
         // The main window merges WPF-UI's implicit styles into the app's resources; these empty ones come first for
@@ -83,10 +93,13 @@ public class ClickThroughWindow : Window
     {
         var hwnd = new WindowInteropHelper(this).Handle;
         long ex = Native.GetWindowLongPtr(hwnd, Native.GWL_EXSTYLE).ToInt64();
-        ex |= Native.WS_EX_TRANSPARENT | Native.WS_EX_LAYERED | Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE;
+        ex |= Native.WS_EX_LAYERED | Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE;
+        if (_clickThrough) ex |= Native.WS_EX_TRANSPARENT;
         Native.SetWindowLongPtr(hwnd, Native.GWL_EXSTYLE, new IntPtr(ex));
         ApplyCaptureAffinity(hwnd);
-        HwndSource.FromHwnd(hwnd)?.AddHook(AllowAnySize);
+        var source = HwndSource.FromHwnd(hwnd);
+        source?.AddHook(AllowAnySize);
+        if (!_clickThrough) source?.AddHook(NeverActivate);
         // WPF took the minimum size from the first query, sent before the hook existed: a resize asks again.
         Native.SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 1, 1, Native.SWP_NOMOVE | Native.SWP_NOZORDER | Native.SWP_NOACTIVATE);
     }
@@ -102,6 +115,14 @@ public class ClickThroughWindow : Window
         info.MinTrackSize = new Native.POINT { X = 1, Y = 1 };
         Marshal.StructureToPtr(info, lParam, false);
         return IntPtr.Zero; // not handled: WPF takes the minimum from here
+    }
+
+    /// <summary>A click on a window that takes clicks leaves the game in front (WS_EX_NOACTIVATE alone does not stop it).</summary>
+    static IntPtr NeverActivate(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        if (msg != Native.WM_MOUSEACTIVATE) return IntPtr.Zero;
+        handled = true;
+        return new IntPtr(Native.MA_NOACTIVATE);
     }
 
     /// <summary>

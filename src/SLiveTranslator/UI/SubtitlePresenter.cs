@@ -98,6 +98,17 @@ public sealed class SubtitlePresenter : ISubtitleSink
     /// <summary>The latest lines with their source and provider, for the history list (any thread).</summary>
     public IReadOnlyList<SubtitleRecord> Records(int lines) => _ui.Invoke(() => _board.Records(lines));
 
+    /// <summary>A line removed on the History page: it leaves the history panel, and the box when it is on screen.</summary>
+    public void RemoveRecord(int id) => _ui.Invoke(() =>
+    {
+        if (!_board.Remove(id, out bool onScreen)) return;
+        if (onScreen) Render();
+        else if (HistoryVisible) RenderHistory();
+    });
+
+    /// <summary>The History page's "Clear history": every line of the session goes, from the history and from the screen.</summary>
+    public void ClearHistory() => ClearText(history: true);
+
     /// <summary>
     /// Shows the user's fix on every line with this source text. The caller stores it in the cache first
     /// (<see cref="SLiveTranslator.Translation.CachedTranslator.SetUserOverride"/>), so the line keeps it when it comes again.

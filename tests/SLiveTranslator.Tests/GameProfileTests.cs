@@ -11,18 +11,43 @@ using Xunit;
 
 namespace SLiveTranslator.Tests;
 
-/// <summary>The profiles shipped with the app, read fresh for each test (a profile is mutable).</summary>
+/// <summary>
+/// The Witcher 3 profile the app shipped until 2.0 (now a test fixture), read fresh for each test (a profile is
+/// mutable), and stores seeded with it the way the app seeded its profiles.
+/// </summary>
 static class TestProfiles
 {
-    public static byte[] Witcher3Bytes => GameProfileStore.EmbeddedSeeds()["witcher3.json"];
+    public static byte[] Witcher3Bytes
+    {
+        get
+        {
+            using var stream = typeof(TestProfiles).Assembly.GetManifestResourceStream("SLiveTranslator.Tests.Fixtures.witcher3.json")!;
+            using var copy = new MemoryStream();
+            stream.CopyTo(copy);
+            return copy.ToArray();
+        }
+    }
 
     public static GameProfile Witcher3() => GameProfileStore.Parse(Witcher3Bytes);
+
+    /// <summary>The fixture as a shipped seed.</summary>
+    public static IReadOnlyDictionary<string, byte[]> Seeds => new Dictionary<string, byte[]> { ["witcher3.json"] = Witcher3Bytes };
+
+    /// <summary>A store that writes the fixture on first use, as the app did with its seed.</summary>
+    public static GameProfileStore Store(string dir) => new(dir, Seeds, []);
 }
 
 public class GameProfileTests
 {
     [Fact]
-    public void The_witcher_3_seed_is_shipped_with_every_section()
+    public void No_profile_ships_with_the_app_any_more()
+    {
+        Assert.Empty(GameProfileStore.EmbeddedSeeds());
+        Assert.Contains("witcher3.json", GameProfileStore.RetiredSeeds);
+    }
+
+    [Fact]
+    public void The_witcher_3_fixture_has_every_section()
     {
         var p = TestProfiles.Witcher3();
 
@@ -132,7 +157,7 @@ public class GameProfileTests
 public class GameProfileStoreTests
 {
     static GameProfileStore Store(TempDir dir, byte[]? seed = null) =>
-        new(dir.Path, new Dictionary<string, byte[]> { ["witcher3.json"] = seed ?? TestProfiles.Witcher3Bytes });
+        new(dir.Path, new Dictionary<string, byte[]> { ["witcher3.json"] = seed ?? TestProfiles.Witcher3Bytes }, []);
 
     static byte[] SeedWithVersion(int version) =>
         Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(TestProfiles.Witcher3Bytes).Replace("\"version\": 1,", $"\"version\": {version},"));
@@ -176,6 +201,81 @@ public class GameProfileStoreTests
 
         Assert.Contains("Jaskier", Assert.Single(updated.Profiles).Keep);
         Assert.Equal(edited, File.ReadAllText(dir.File("witcher3.json")));
+    }
+
+    /// <summary>This build: the profile shipped before (seeded by <see cref="Store"/>) is retired.</summary>
+    static GameProfileStore Retiring(TempDir dir) => new(dir.Path, new Dictionary<string, byte[]>(), ["witcher3.json"]);
+
+    [Fact]
+    public void A_retired_profile_the_user_never_changed_is_deleted_once_and_the_setting_naming_it_goes_back_to_automatic()
+    {
+        using var dir = new TempDir();
+        _ = Store(dir).Profiles; // written by the build that shipped it
+        File.WriteAllText(dir.File("mine.json"), """{ "id": "mine", "name": "Mine" }""");
+
+        var store = Retiring(dir);
+
+        Assert.Equal(["mine"], store.Profiles.Select(p => p.Id));
+        Assert.Equal(["witcher3"], store.Retired);
+        Assert.False(File.Exists(dir.File("witcher3.json")));
+        Assert.DoesNotContain("witcher3", File.ReadAllText(dir.File(GameProfileStore.SeedStateFile)));
+        Assert.Equal(GameProfileStore.Auto, store.ReplacementFor("witcher3"));
+        Assert.Equal(GameProfileStore.Auto, store.ReplacementFor(" Witcher3 "));
+        Assert.Null(store.ReplacementFor("mine"));
+        Assert.Null(store.ReplacementFor(GameProfileStore.Auto));
+        Assert.Null(store.ReplacementFor(GameProfileStore.Off));
+        Assert.Null(store.ReplacementFor("gone-by-hand")); // not one this build retired: the user's own setting
+
+        // Done once: a copy the user puts back later is theirs.
+        File.WriteAllBytes(dir.File("witcher3.json"), TestProfiles.Witcher3Bytes);
+        var next = Retiring(dir);
+        Assert.Contains(next.Profiles, p => p.Id == "witcher3");
+        Assert.Empty(next.Retired);
+    }
+
+    [Fact]
+    public void A_retired_profile_the_user_changed_is_kept()
+    {
+        using var dir = new TempDir();
+        _ = Store(dir).Profiles;
+        string edited = File.ReadAllText(dir.File("witcher3.json")).Replace("\"Geralt\", \"Gwynbleidd\"", "\"Geralt\", \"Gwynbleidd\", \"Jaskier\"");
+        File.WriteAllText(dir.File("witcher3.json"), edited);
+
+        var store = Retiring(dir);
+
+        Assert.Contains("Jaskier", Assert.Single(store.Profiles).Keep);
+        Assert.Empty(store.Retired);
+        Assert.Null(store.ReplacementFor("witcher3"));
+        Assert.DoesNotContain("witcher3", File.ReadAllText(dir.File(GameProfileStore.SeedStateFile))); // no longer tracked
+    }
+
+    [Fact]
+    public void A_retired_file_with_no_record_is_the_users_and_stays()
+    {
+        using var dir = new TempDir();
+        File.WriteAllBytes(dir.File("witcher3.json"), TestProfiles.Witcher3Bytes); // copied from another PC
+
+        Assert.Single(Retiring(dir).Profiles);
+        Assert.True(File.Exists(dir.File("witcher3.json")));
+    }
+
+    [Fact]
+    public void A_removed_profile_is_gone_and_a_removed_shipped_one_is_not_written_again()
+    {
+        using var dir = new TempDir();
+        var store = Store(dir);
+        _ = store.Profiles;
+        File.WriteAllText(dir.File("mine.json"), """{ "id": "mine", "name": "Mine" }""");
+        store = Store(dir);
+
+        Assert.True(store.Delete("witcher3"));
+        Assert.True(store.Delete("MINE"));
+        Assert.False(store.Delete("nothing"));
+
+        Assert.Empty(store.Profiles);
+        Assert.False(File.Exists(dir.File("witcher3.json")));
+        Assert.False(File.Exists(dir.File("mine.json")));
+        Assert.Empty(Store(dir).Profiles); // still shipped, but removed by the user
     }
 
     [Fact]

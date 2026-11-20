@@ -107,10 +107,10 @@ public class SettingsViewModelTests
 
         Assert.True(vm.HasChanges);
         Assert.True(vm.SaveCommand.CanExecute(null));
-        Assert.Equal(22, host.Current.Overlay.FontSize); // the settings in use are untouched until Save
+        Assert.Equal(OverlaySettings.DefaultFontSize, host.Current.Overlay.FontSize); // the settings in use are untouched until Save
         Assert.Equal(SettingsChange.Overlay, vm.PendingChanges);
 
-        vm.Overlay.FontSize = 22; // edited back
+        vm.Overlay.FontSize = OverlaySettings.DefaultFontSize; // edited back
         Assert.False(vm.HasChanges);
     }
 

@@ -65,7 +65,7 @@ public class SettingsStoreTests
         Assert.Equal("claude-opus-5-5", s.Translation.Claude.Model);
         Assert.Equal(300, s.Subtitles.IntervalMs);
         Assert.Equal(new RegionSettings(327, 1094, 1825, 212), s.Subtitles.Region);
-        Assert.Equal(22, s.Overlay.FontSize);
+        Assert.Equal(OverlaySettings.DefaultFontSize, s.Overlay.FontSize); // version 1's default 22 is the old default
         Assert.Equal(12, s.Overlay.LabelSeconds);
         Assert.Equal("Ctrl+Shift+T", s.Hotkeys.Map[HotkeyAction.TranslateScreen]);
         Assert.Equal("Ctrl+Shift+S", s.Hotkeys.Map[HotkeyAction.ToggleSubtitles]);
@@ -79,7 +79,7 @@ public class SettingsStoreTests
 
         Assert.Equal(v1, File.ReadAllText(store.V1BackupPath));
         string saved = File.ReadAllText(store.FilePath);
-        Assert.Contains("\"SchemaVersion\": 2", saved);
+        Assert.Contains($"\"SchemaVersion\": {SettingsStore.CurrentSchemaVersion}", saved);
         Assert.Contains("\"TranslateScreen\": \"Ctrl+Shift+T\"", saved);
         Assert.DoesNotContain(@"\u002B", saved);
         Assert.False(File.Exists(store.FilePath + ".tmp"));
@@ -217,7 +217,7 @@ public class SettingsStoreTests
         var store = new SettingsStore(dir.File("settings.json"));
         File.WriteAllText(store.FilePath, """
             {
-              "SchemaVersion": 3,
+              "SchemaVersion": 4,
               "General": { "TargetLanguage": "ja", "FirstRunDone": true, "FutureFlag": true },
               "FutureSection": { "Answer": 42 }
             }
@@ -228,7 +228,8 @@ public class SettingsStoreTests
         Assert.True(s.IsNewerSchema);
         Assert.False(store.MigratedFromV1);
         Assert.Null(store.LoadProblem);
-        Assert.Equal(3, s.SchemaVersion);
+        Assert.False(store.Upgraded);
+        Assert.Equal(4, s.SchemaVersion);
         Assert.Equal("ja", s.General.TargetLanguage);
         Assert.True(s.General.FirstRunDone);
 
@@ -236,7 +237,7 @@ public class SettingsStoreTests
         store.Save(s);
         var saved = JsonNode.Parse(File.ReadAllText(store.FilePath))!;
 
-        Assert.Equal(3, saved["SchemaVersion"]!.GetValue<int>());
+        Assert.Equal(4, saved["SchemaVersion"]!.GetValue<int>());
         Assert.True(saved["General"]!["FutureFlag"]!.GetValue<bool>());
         Assert.Equal(42, saved["FutureSection"]!["Answer"]!.GetValue<int>());
         Assert.Equal(40, saved["Overlay"]!["FontSize"]!.GetValue<int>());
@@ -276,7 +277,7 @@ public class SettingsStoreTests
 
         Assert.False(s.General.FirstRunDone);
         Assert.Equal(ProviderIds.Free, s.Translation.Provider);
-        Assert.Equal(22, s.Overlay.FontSize);
+        Assert.Equal(OverlaySettings.DefaultFontSize, s.Overlay.FontSize);
         Assert.Contains(Path.GetFileName(store.CorruptCopyPath), store.LoadProblem);
         Assert.Equal(content, File.ReadAllText(store.CorruptCopyPath));
         Assert.Equal(content, File.ReadAllText(store.FilePath)); // left alone until the next save
@@ -339,6 +340,7 @@ public class SettingsStoreTests
     [Theory]
     [InlineData(2)]
     [InlineData(3)]
+    [InlineData(4)]
     public void Unknown_enum_values_and_hotkey_actions_load_and_survive_a_save(int schema)
     {
         using var dir = new TempDir();
@@ -380,7 +382,7 @@ public class SettingsStoreTests
         store.Save(s);
         var saved = JsonNode.Parse(File.ReadAllText(store.FilePath))!;
 
-        Assert.Equal(schema, saved["SchemaVersion"]!.GetValue<int>());
+        Assert.Equal(System.Math.Max(schema, SettingsStore.CurrentSchemaVersion), saved["SchemaVersion"]!.GetValue<int>()); // older: raised
         Assert.Equal("HighContrast", saved["General"]!["Theme"]!.GetValue<string>());
         Assert.Equal("High", saved["Translation"]!["Claude"]!["Effort"]!.GetValue<string>());
         Assert.Equal(blob, saved["Translation"]!["Claude"]!["ApiKeyProtected"]!.GetValue<string>());
@@ -410,6 +412,54 @@ public class SettingsStoreTests
         Assert.Equal(AppTheme.Dark, again.General.Theme);
         Assert.Equal("F9", again.Hotkeys[HotkeyAction.Clear]);
         Assert.Empty(again.Hotkeys.Disabled);
+    }
+
+    [Theory]
+    [InlineData(22, 12)] // the old default becomes the new one
+    [InlineData(30, 30)] // a size the user chose stays
+    [InlineData(12, 12)]
+    public void A_schema_2_file_is_raised_once_and_its_old_default_size_becomes_12(int before, int after)
+    {
+        using var dir = new TempDir();
+        var store = new SettingsStore(dir.File("settings.json"));
+        string content = """{"SchemaVersion": 2, "General": {"FirstRunDone": true}, "Overlay": {"FontSize": """ + before + """, "MaxLines": 4}}""";
+        File.WriteAllText(store.FilePath, content);
+
+        var s = store.Load();
+
+        Assert.True(store.Upgraded);
+        Assert.Equal(after, s.Overlay.FontSize);
+        Assert.Equal(4, s.Overlay.MaxLines);
+        Assert.Equal(SettingsStore.CurrentSchemaVersion, s.SchemaVersion);
+        Assert.Equal(content, File.ReadAllText(store.FilePath)); // loading alone writes nothing
+
+        store.Save(s);
+        var saved = JsonNode.Parse(File.ReadAllText(store.FilePath))!;
+        Assert.Equal(after, saved["Overlay"]!["FontSize"]!.GetValue<int>());
+        Assert.Equal(SettingsStore.CurrentSchemaVersion, saved["SchemaVersion"]!.GetValue<int>());
+
+        // Raised once: 22 chosen afterwards is the user's and stays.
+        s.Overlay.FontSize = 22;
+        store.Save(s);
+        var reloaded = new SettingsStore(store.FilePath);
+        Assert.Equal(22, reloaded.Load().Overlay.FontSize);
+        Assert.False(reloaded.Upgraded);
+    }
+
+    [Fact]
+    public void A_current_or_newer_file_with_22_is_not_touched()
+    {
+        using var dir = new TempDir();
+        foreach (int schema in new[] { SettingsStore.CurrentSchemaVersion, SettingsStore.CurrentSchemaVersion + 1 })
+        {
+            var store = new SettingsStore(dir.File($"settings{schema}.json"));
+            File.WriteAllText(store.FilePath, """{"SchemaVersion": """ + schema + """, "Overlay": {"FontSize": 22}}""");
+
+            var s = store.Load();
+
+            Assert.False(store.Upgraded);
+            Assert.Equal(22, s.Overlay.FontSize);
+        }
     }
 
     [Fact]
@@ -445,7 +495,7 @@ public class SettingsStoreTests
 
         Assert.True(s.General.FirstRunDone);
         Assert.Equal(new RegionSettings(1, 2, 3, 4), s.Subtitles.Region);
-        Assert.Equal(22, s.Overlay.FontSize);
+        Assert.Equal(OverlaySettings.DefaultFontSize, s.Overlay.FontSize);
         Assert.Equal(3, s.Overlay.MaxLines);
         Assert.True(s.Notifications.TrayBalloons);
         Assert.Contains("Overlay, Notifications", store.LoadProblem);
@@ -453,7 +503,7 @@ public class SettingsStoreTests
 
         store.Save(s);
         var saved = JsonNode.Parse(File.ReadAllText(store.FilePath))!;
-        Assert.Equal(22, saved["Overlay"]!["FontSize"]!.GetValue<int>()); // the damaged value is not written back
+        Assert.Equal(OverlaySettings.DefaultFontSize, saved["Overlay"]!["FontSize"]!.GetValue<int>()); // the damaged value is not written back
         Assert.NotNull(saved["Notifications"]);
         var reloaded = new SettingsStore(store.FilePath);
         Assert.True(reloaded.Load().General.FirstRunDone);
@@ -496,7 +546,7 @@ public class SettingsStoreTests
         store.Save(s);
 
         Assert.Equal(content, File.ReadAllText(store.UnreadCopyPath));
-        Assert.Contains("\"SchemaVersion\": 2", File.ReadAllText(store.FilePath));
+        Assert.Contains($"\"SchemaVersion\": {SettingsStore.CurrentSchemaVersion}", File.ReadAllText(store.FilePath));
         File.Delete(store.UnreadCopyPath);
         store.Save(s);
         Assert.False(File.Exists(store.UnreadCopyPath)); // only the first save copies

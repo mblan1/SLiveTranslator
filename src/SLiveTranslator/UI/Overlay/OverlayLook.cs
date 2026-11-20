@@ -28,6 +28,13 @@ internal static class OverlayLook
     static readonly Brush AccentWarning = Frozen(0xFF, 0xFF, 0xB3, 0x00);
     static readonly Brush AccentError = Frozen(0xFF, 0xF4, 0x43, 0x36);
 
+    public static readonly Brush MenuSelected = Frozen(0x40, 0x60, 0xCD, 0xFF);
+    public static readonly Brush MenuAccent = Frozen(0xFF, 0x60, 0xCD, 0xFF);
+    public static readonly Brush MenuBadge = Frozen(0x26, 0xFF, 0xFF, 0xFF);
+    public static readonly Brush MenuButton = Frozen(0x33, 0xFF, 0xFF, 0xFF);
+    public static readonly Brush MenuWarning = Frozen(0xFF, 0xFF, 0xB3, 0x00);
+    public static readonly Brush Clear = Brushes.Transparent;
+
     public static readonly Brush TimeLeftTrack = Frozen(0x2E, 0xFF, 0xFF, 0xFF);
     public static readonly Brush TimeLeftFill = Frozen(0xCC, 0xFF, 0xFF, 0xFF);
 

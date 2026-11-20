@@ -47,8 +47,10 @@ public sealed class RegionsViewModel : SettingsPageViewModel
     [
         nameof(HasRegion), nameof(RegionText), nameof(Preview), nameof(OverlapText), nameof(OverlapKind), nameof(IsCustom),
         nameof(PlaceAbove), nameof(PlaceBelow), nameof(PlaceBottom), nameof(PlaceOver), nameof(PlaceCustom),
-        nameof(CustomX), nameof(CustomY), nameof(CustomWidth), nameof(CustomHeight),
+        nameof(CustomX), nameof(CustomY), nameof(CustomWidth), nameof(CustomHeight), nameof(CanPlaceOver), nameof(KeptOffText),
     ];
+
+    string _keptOffText = "";
 
     readonly ISettingsHost _host;
     CancellationTokenSource? _testCts;
@@ -59,9 +61,10 @@ public sealed class RegionsViewModel : SettingsPageViewModel
     public RegionsViewModel(SettingsViewModel root, ISettingsHost host) : base(root)
     {
         _host = host;
-        PickBothCommand = new RelayCommand(() => host.SelectRegions(RegionPickMode.Both));
-        PickReadCommand = new RelayCommand(() => host.SelectRegions(RegionPickMode.ReadOnly));
-        PickDisplayCommand = new RelayCommand(() => host.SelectRegions(RegionPickMode.DisplayOnly), () => HasRegion);
+        // The picker starts from these (unsaved) settings, so it keeps the display mode chosen here.
+        PickBothCommand = new RelayCommand(() => host.SelectRegions(RegionPickMode.Both, Working));
+        PickReadCommand = new RelayCommand(() => host.SelectRegions(RegionPickMode.ReadOnly, Working));
+        PickDisplayCommand = new RelayCommand(() => host.SelectRegions(RegionPickMode.DisplayOnly, Working), () => HasRegion);
         TestReadingCommand = new AsyncRelayCommand(TestReadingAsync, () => HasRegion);
         Swatches = new[] { BackgroundColors.Transparent }.Concat(BackgroundColors.Swatches).Select(c => new ColorChoice(this, c)).ToList();
         _customColorText = CustomColorOf(O.BackgroundColor);
@@ -121,14 +124,32 @@ public sealed class RegionsViewModel : SettingsPageViewModel
         set => SetRead(r => r with { Height = Math.Max(10, (int)Math.Round(value)) });
     }
 
-    /// <summary>A typed number changes the region; with no region yet there is nothing to change (pick one first).</summary>
+    /// <summary>
+    /// A typed number changes the region; with no region yet there is nothing to change (pick one first). In Shared
+    /// mode a region moved onto the translation's box moves the box, never the region.
+    /// </summary>
     void SetRead(Func<RegionSettings, RegionSettings> change, [CallerMemberName] string? name = null)
     {
         if (S.Region is null) return;
         var next = change(S.Region);
         Set(S.Region, next, v => S.Region = v, name);
+        _keptOffText = "";
+        var fix = RegionRules.Enforce(O, S.Region, ScreenOf(S.Region));
+        if (fix != PlacementFix.None)
+        {
+            _keptOffText = RegionRules.NoticeFor(fix);
+            Root.Edited();
+        }
         Refresh();
     }
+
+    static System.Drawing.Rectangle ScreenOf(RegionSettings region) => System.Windows.Forms.Screen.FromRectangle(region.ToRectangle()).Bounds;
+
+    /// <summary>What the Shared-mode rule just changed or stopped; "" when nothing.</summary>
+    public string KeptOffText => _keptOffText;
+
+    /// <summary>"Over the original" is not offered in Shared on screen: the app's own OCR would read the translation.</summary>
+    public bool CanPlaceOver => !RegionRules.MustAvoid(O);
 
     /// <summary>A strip at the bottom of the primary monitor, for a custom box made before any region was picked.</summary>
     static RegionSettings DefaultRegion()
@@ -215,6 +236,12 @@ public sealed class RegionsViewModel : SettingsPageViewModel
     void Place(bool chosen, SubtitlePosition position)
     {
         if (!chosen || O.Position == position) return;
+        if (position == SubtitlePosition.OverRegion && !CanPlaceOver)
+        {
+            OnPropertyChanged(nameof(PlaceOver)); // the radio button goes back
+            return;
+        }
+        _keptOffText = "";
         // A custom box starts where the translation is now, so choosing it moves nothing yet.
         if (position == SubtitlePosition.Custom && O.DisplayRegion is null)
         {
@@ -222,6 +249,11 @@ public sealed class RegionsViewModel : SettingsPageViewModel
             O.DisplayRegion = RegionSettings.From(RegionPreview.ShowBox(O, read, System.Windows.Forms.Screen.FromRectangle(read).Bounds));
         }
         Set(O.Position, position, v => O.Position = v, nameof(O.Position));
+        if (RegionRules.Enforce(O, S.Region, S.Region is { } r ? ScreenOf(r) : default) is var fix and not PlacementFix.None)
+        {
+            _keptOffText = RegionRules.NoticeFor(fix);
+            Root.Edited();
+        }
         Refresh();
     }
 
@@ -249,11 +281,30 @@ public sealed class RegionsViewModel : SettingsPageViewModel
         set => SetCustom(r => r with { Height = Math.Max(20, (int)Math.Round(value)) });
     }
 
+    /// <summary>
+    /// A typed number changes the custom box. In Shared mode a box typed onto the read region stops at its edge: X or Y
+    /// moves the box (it slides along the side it was on), Width or Height moves the right or bottom edge.
+    /// </summary>
     void SetCustom(Func<RegionSettings, RegionSettings> change, [CallerMemberName] string? name = null)
     {
         if (O.DisplayRegion is null) return;
-        var next = change(O.DisplayRegion);
-        Set(O.DisplayRegion, next, v => O.DisplayRegion = v, name);
+        var from = O.DisplayRegion;
+        var next = change(from);
+        _keptOffText = "";
+        if (RegionRules.MustAvoid(O) && S.Region is { } read)
+        {
+            var r = Edges.Of(read.ToRectangle());
+            var wanted = Edges.Of(next.ToRectangle());
+            var kept = name is nameof(CustomWidth) or nameof(CustomHeight)
+                ? RegionRules.ClampResize(wanted, Edges.Of(from.ToRectangle()), r, Sides.Right | Sides.Bottom)
+                : RegionRules.ClampMove(wanted, Edges.Of(from.ToRectangle()), r, Edges.Of(ScreenOf(read)));
+            if (kept != wanted)
+            {
+                next = RegionSettings.From(kept.ToDRect());
+                _keptOffText = Loc.Instance["Regions.KeptOff"];
+            }
+        }
+        Set(from, next, v => O.DisplayRegion = v, name);
         Refresh();
     }
 
@@ -296,7 +347,7 @@ public sealed class RegionsViewModel : SettingsPageViewModel
         if (settings.Subtitles.Region is not { } region) return (Loc.Instance["Regions.NoRegionYet"], MessageKind.Info);
         var o = settings.Overlay;
         bool covers = SubtitlePlacement.Covers(o.Position, o.DisplayRegion?.ToRectangle(), region.ToRectangle());
-        bool shared = o.DisplayMode == DisplayMode.Shared && o.Share.Subtitles;
+        bool shared = RegionRules.MustAvoid(o);
         if (!covers) return (Loc.Instance["Regions.ClearOfRead"], MessageKind.Success);
         return shared ? (Loc.Instance["Regions.CoversShared"], MessageKind.Warning) : (Loc.Instance["Regions.CoversPrivate"], MessageKind.Info);
     }

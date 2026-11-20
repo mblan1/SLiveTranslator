@@ -111,6 +111,20 @@ internal sealed class SubtitleBoard
     /// <summary>The box was hidden: the lines so far stay in the history only.</summary>
     public void CloseWindow() => _windowStart = _entries.Count;
 
+    /// <summary>The user removed this line (the History page): it leaves the history, and the box if it is in it.</summary>
+    /// <param name="onScreen">Whether the line was one of the box's current conversation.</param>
+    /// <returns>False when no line has this id (it was trimmed away or cleared).</returns>
+    public bool Remove(int id, out bool onScreen)
+    {
+        onScreen = false;
+        int index = _entries.FindIndex(e => e.Id == id);
+        if (index < 0) return false;
+        onScreen = index >= _windowStart;
+        _entries.RemoveAt(index);
+        if (index < _windowStart) _windowStart--;
+        return true;
+    }
+
     /// <summary>Forgets every line of the session: the box and the history start empty.</summary>
     public void Clear()
     {

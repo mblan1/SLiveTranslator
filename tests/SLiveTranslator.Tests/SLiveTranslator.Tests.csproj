@@ -21,4 +21,9 @@
     <ProjectReference Include="..\..\src\SLiveTranslator\SLiveTranslator.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The Witcher 3 profile the app shipped until 2.0: a large real profile for the translation, matching and prompt tests. -->
+    <EmbeddedResource Include="Fixtures\witcher3.json" LogicalName="SLiveTranslator.Tests.Fixtures.witcher3.json" />
+  </ItemGroup>
+
 </Project>

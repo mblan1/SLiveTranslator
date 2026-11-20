@@ -21,7 +21,11 @@ namespace SLiveTranslator.Models;
 /// </summary>
 public sealed class SettingsStore
 {
-    public const int CurrentSchemaVersion = 2;
+    /// <summary>3: the default subtitle size went from 22 to 12 (see <see cref="Upgrade"/>).</summary>
+    public const int CurrentSchemaVersion = 3;
+
+    /// <summary>The subtitle size schemas 1 and 2 started with.</summary>
+    const int OldDefaultFontSize = 22;
 
     /// <summary>Antivirus or OneDrive can hold the file for a moment at login.</summary>
     const int ReadAttempts = 3;
@@ -77,8 +81,11 @@ public sealed class SettingsStore
     /// <summary>Where a file that could not be read is kept before the first save replaces it.</summary>
     public string UnreadCopyPath => _path + ".bak";
 
-    /// <summary>The last <see cref="Load"/> converted a version-1 file; save once to store it as schema 2 with encrypted keys.</summary>
+    /// <summary>The last <see cref="Load"/> converted a version-1 file; save once to store it as the current schema with encrypted keys.</summary>
     public bool MigratedFromV1 { get; private set; }
+
+    /// <summary>The last <see cref="Load"/> raised an older file to <see cref="CurrentSchemaVersion"/>; save once to store it.</summary>
+    public bool Upgraded { get; private set; }
 
     /// <summary>
     /// What went wrong in the last <see cref="Load"/>, to show the user, in the language in use when it is read: the
@@ -93,7 +100,7 @@ public sealed class SettingsStore
     /// </summary>
     public AppSettings Load()
     {
-        MigratedFromV1 = _v1BackupPending = _unreadBackupPending = false;
+        MigratedFromV1 = Upgraded = _v1BackupPending = _unreadBackupPending = false;
         _fileJson = null;
         _syncedJson = null;
         _problem = null;
@@ -105,6 +112,7 @@ public sealed class SettingsStore
                        ?? throw new JsonException("the file does not hold a JSON object");
             int version = root["SchemaVersion"]?.GetValue<int>() ?? 1;
             if (version <= 1) return LoadV1(root);
+            if (version < CurrentSchemaVersion) Upgraded = Upgrade(root, version);
 
             var broken = new List<string>();
             var settings = ReadSections(root, broken);
@@ -261,6 +269,21 @@ public sealed class SettingsStore
 
     static bool IsBadContent(Exception ex) => ex is JsonException or InvalidOperationException or FormatException;
 
+    /// <summary>
+    /// Raises an older file to the current schema on its JSON, before it is read: done on the object instead, the merge
+    /// on save would keep the file's old value (it was "unchanged since read"). Schema 3: the old default subtitle size
+    /// (22) becomes the new one; a size the user chose stays, and a later 22 is never touched again.
+    /// </summary>
+    static bool Upgrade(JsonObject root, int version)
+    {
+        if (version < 3 && root["Overlay"] is JsonObject overlay && overlay["FontSize"] is JsonValue size
+            && size.TryGetValue(out int fontSize) && fontSize == OldDefaultFontSize)
+            overlay["FontSize"] = OverlaySettings.DefaultFontSize;
+        root["SchemaVersion"] = CurrentSchemaVersion;
+        Log.Write($"settings: schema {version} → {CurrentSchemaVersion}");
+        return true;
+    }
+
     AppSettings LoadV1(JsonObject root)
     {
         var v1 = root.Deserialize<V1Settings>(JsonOptions) ?? new V1Settings();
@@ -311,7 +334,7 @@ public sealed class SettingsStore
         settings.Translation.Claude.Model = v1.ClaudeModel;
         settings.Subtitles.IntervalMs = v1.SubtitleIntervalMs;
         settings.Subtitles.Region = v1.SubtitleRegion;
-        settings.Overlay.FontSize = v1.FontSize;
+        settings.Overlay.FontSize = v1.FontSize == OldDefaultFontSize ? OverlaySettings.DefaultFontSize : v1.FontSize;
         settings.Overlay.LabelSeconds = v1.ScreenOverlaySeconds;
         settings.Hotkeys[HotkeyAction.TranslateScreen] = v1.HotkeyTranslateScreen;
         settings.Hotkeys[HotkeyAction.ToggleSubtitles] = v1.HotkeyToggleSubtitles;
@@ -332,7 +355,7 @@ public sealed class SettingsStore
         public string ClaudeModel { get; set; } = "claude-opus-5-5";
         public int SubtitleIntervalMs { get; set; } = 300;
         public RegionSettings? SubtitleRegion { get; set; }
-        public int FontSize { get; set; } = 22;
+        public int FontSize { get; set; } = OldDefaultFontSize;
         public int ScreenOverlaySeconds { get; set; } = 12;
         public string HotkeyTranslateScreen { get; set; } = HotkeySettings.Defaults[HotkeyAction.TranslateScreen];
         public string HotkeyToggleSubtitles { get; set; } = HotkeySettings.Defaults[HotkeyAction.ToggleSubtitles];

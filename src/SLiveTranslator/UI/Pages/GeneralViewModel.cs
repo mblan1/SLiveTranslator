@@ -121,6 +121,7 @@ public sealed class GeneralViewModel : SettingsPageViewModel
     }
 
     public string Version => AppInfo.Version;
+    public string Author => AppInfo.Author;
     public string Runtime => AppInfo.Runtime;
     public string OsDescription => AppInfo.OsDescription;
     public string OcrLanguages => _host.OcrLanguages.Count > 0 ? string.Join(", ", _host.OcrLanguages) : Loc.Instance["General.NoOcr"];

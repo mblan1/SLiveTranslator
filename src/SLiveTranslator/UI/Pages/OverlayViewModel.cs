@@ -60,7 +60,11 @@ public sealed class OverlayViewModel : SettingsPageViewModel
         get => Positions.FirstOrDefault(p => p.Value == O.Position) ?? Positions[0];
         set
         {
-            if (value is not null) Set(O.Position, value.Value, v => O.Position = v);
+            if (value is null) return;
+            // "Over the original" is not offered in Shared on screen (see RegionRules): it stays above the region.
+            var position = value.Value == SubtitlePosition.OverRegion && Overlay.RegionRules.MustAvoid(O) ? SubtitlePosition.AboveRegion : value.Value;
+            Set(O.Position, position, v => O.Position = v);
+            if (position != value.Value) OnPropertyChanged();
         }
     }
 

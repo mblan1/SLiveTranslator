@@ -16,6 +16,9 @@
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
     <Version>2.0.0</Version>
+    <Authors>Snw</Authors>
+    <Company>Snw</Company>
+    <Product>SLiveTranslator</Product>
     <!-- WFO0003 asks WinForms apps to set DPI awareness in code instead of the manifest. This is a WPF app: the
          manifest is what makes the process per-monitor aware before WPF starts, which the overlays' pixel layout needs. -->
     <NoWarn>$(NoWarn);WFO0003</NoWarn>
@@ -29,7 +32,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Game profiles shipped with the app; GameProfileStore writes them to the data folder on first use. -->
+    <!-- Game profiles shipped with the app (none since 2.1; Witcher 3 is a test fixture now); GameProfileStore writes them to the data folder on first use. -->
     <EmbeddedResource Include="Assets\Profiles\*.json" LogicalName="SLiveTranslator.Assets.Profiles.%(Filename)%(Extension)" />
     <!-- The UI texts per language, read by UI/Loc.cs. -->
     <EmbeddedResource Include="Assets\Strings\*.json" LogicalName="SLiveTranslator.Assets.Strings.%(Filename)%(Extension)" />

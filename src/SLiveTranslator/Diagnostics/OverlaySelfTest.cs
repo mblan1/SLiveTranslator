@@ -69,6 +69,8 @@ internal static class OverlaySelfTest
         Check(overlay, area, "shown", outDir, report, failures);
 
         await CheckPickerAsync(subtitleRegion, outDir, report, failures);
+        await CheckSharedPickerAsync(subtitleRegion, outDir, report, failures);
+        await CheckMenuAsync(outDir, report, failures);
         await CheckMainWindowAsync(outDir, report, failures);
         Check(overlay, area, "after the main window", null, report, failures);
         await CheckUpdateWindowAsync(outDir, report, failures);
@@ -108,6 +110,74 @@ internal static class OverlaySelfTest
         finally
         {
             picker.Close();
+        }
+    }
+
+    /// <summary>
+    /// Step 2 alone in Shared on screen, started from a saved custom box that covers the read region: the box must start
+    /// off the region (and so be saved off it), and "over the original" must not be offered.
+    /// </summary>
+    static async Task CheckSharedPickerAsync(DRect read, string outDir, List<string> report, List<string> failures)
+    {
+        var look = new OverlaySettings
+        {
+            DisplayMode = DisplayMode.Shared,
+            Position = SubtitlePosition.Custom,
+            DisplayRegion = RegionSettings.From(new DRect(read.X + 60, read.Y + 20, read.Width / 2, read.Height)),
+        };
+        var picker = new RegionSelectWindow(Forms.Screen.PrimaryScreen!, RegionPickMode.DisplayOnly, read, look, null);
+        try
+        {
+            picker.Show();
+            await Task.Delay(500);
+            SaveRendering(picker, Path.Combine(outDir, "selftest_picker_shared.png"));
+            var custom = picker.PendingPick?.Display?.Custom;
+            bool off = custom is { } box && !Edges.Of(box).Overlaps(Edges.Of(read));
+            report.Add($"shared picker: custom={custom} keptOff={off} overOffered={picker.OverPresetEnabled}");
+            if (!off) failures.Add($"in Shared mode the picker kept a display box on the read region ({custom})");
+            if (picker.OverPresetEnabled) failures.Add("in Shared mode the picker offers \"over the original\"");
+        }
+        catch (Exception ex)
+        {
+            failures.Add("shared picker: " + ex.GetType().Name + ": " + ex.Message);
+        }
+        finally
+        {
+            picker.Close();
+        }
+    }
+
+    /// <summary>
+    /// The in-game menu over the primary monitor: saved as a picture; it must be hidden from capture, take clicks without
+    /// being activated, and leave the window in front where it was.
+    /// </summary>
+    static async Task CheckMenuAsync(string outDir, List<string> report, List<string> failures)
+    {
+        var menu = new MenuOverlay();
+        try
+        {
+            var before = Native.GetForegroundWindow();
+            var items = GameMenu.Build(new MenuState(true, false, false, false, OverlaySettings.DefaultFontSize, new HotkeySettings()));
+            menu.ShowMenu(Loc.Instance["GameMenu.Title"], items, 2, Loc.F("GameMenu.Keys", HotkeySettings.Defaults[HotkeyAction.Menu]),
+                Forms.Screen.PrimaryScreen!.Bounds);
+            await Task.Delay(300);
+            SaveRendering(menu, Path.Combine(outDir, "selftest_menu.png"));
+            long ex = Native.GetWindowLongPtr(menu.Handle, Native.GWL_EXSTYLE).ToInt64();
+            bool noActivate = (ex & Native.WS_EX_NOACTIVATE) != 0, clickThrough = (ex & Native.WS_EX_TRANSPARENT) != 0;
+            bool keptFront = Native.GetForegroundWindow() == before;
+            report.Add($"menu: visible={menu.IsVisible} excludedFromCapture={menu.ExcludedFromCapture} noActivate={noActivate} clickThrough={clickThrough} keptFront={keptFront} bounds={menu.BoundsPx}");
+            if (!menu.IsVisible) failures.Add("the menu did not show");
+            if (!menu.ExcludedFromCapture) failures.Add("the menu is not hidden from screen capture");
+            if (!noActivate || clickThrough) failures.Add("the menu window would be activated, or does not take clicks");
+            if (!keptFront) failures.Add("showing the menu took the foreground from the window in front");
+        }
+        catch (Exception ex)
+        {
+            failures.Add("menu: " + ex.GetType().Name + ": " + ex.Message);
+        }
+        finally
+        {
+            menu.Close();
         }
     }
 

@@ -162,6 +162,8 @@
                         <TextBlock Style="{StaticResource Body}" Text="{Binding PlacementText}"/>
                         <ui:InfoBar Margin="0,6,0,0" IsOpen="True" IsClosable="False" Message="{Binding PlacementStatus}"
                                     Severity="{Binding PlacementKind, Converter={StaticResource SeverityOf}}"/>
+                        <ui:InfoBar Margin="0,6,0,0" IsOpen="True" IsClosable="False" Severity="Warning" Message="{Binding MovedNote}"
+                                    Visibility="{Binding MovedNote, Converter={StaticResource VisibleWhen}}"/>
                     </StackPanel>
                 </DockPanel>
             </Border>

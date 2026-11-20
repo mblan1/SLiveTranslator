@@ -63,6 +63,9 @@ public partial class RegionSelectWindow : Window
 
     readonly RegionPickMode _mode;
     readonly OverlaySettings _look;
+
+    /// <summary>Shared on screen: the display box must keep off the read region (see <see cref="RegionRules"/>).</summary>
+    readonly bool _avoid;
     readonly Func<DRect, CancellationToken, Task<ReadPreview?>>? _reader;
     readonly DispatcherTimer _readTimer = new() { Interval = TimeSpan.FromMilliseconds(400) };
     readonly List<(ToggleButton Button, string Color)> _swatches = new();
@@ -85,6 +88,12 @@ public partial class RegionSelectWindow : Window
     bool _outline;
     bool _syncing;
 
+    /// <summary>The last drag or key was stopped at the read region's edge (the status chip says so).</summary>
+    bool _keptOff;
+
+    /// <summary>A new box was started on the read region in Shared mode, which is not allowed (the chip says so).</summary>
+    bool _startedOnRead;
+
     /// <summary>The read region alone (the first-run wizard and the tests).</summary>
     public RegionSelectWindow(Forms.Screen screen) : this(screen, RegionPickMode.ReadOnly, null, new OverlaySettings(), null)
     {
@@ -100,6 +109,7 @@ public partial class RegionSelectWindow : Window
         _screen = screen;
         _mode = readPx is null && mode == RegionPickMode.DisplayOnly ? RegionPickMode.Both : mode;
         _look = look;
+        _avoid = RegionRules.MustAvoid(look);
         _reader = reader;
         _readPx = readPx;
         _accent = (Brush)Resources["Accent"];
@@ -204,9 +214,21 @@ public partial class RegionSelectWindow : Window
         _custom = _look.DisplayRegion is { } custom && _screen.Bounds.IntersectsWith(custom.ToRectangle())
             ? ToDip(custom.ToRectangle())
             : null;
+        if (_avoid && ReadDip is { } read)
+        {
+            // In Shared mode the box starts off the read region: "over the original" is not offered, and a saved box on
+            // the region moves above it (below when there is no room).
+            if (_position == SubtitlePosition.OverRegion) _position = SubtitlePosition.AboveRegion;
+            if (_custom is { } box && Edges.Of(box).Overlaps(read))
+                _custom = RegionRules.AboveOrBelow(Edges.Of(box), read, Edges.Of(Area), RegionRules.Gap / Scale)?.Box.ToRect();
+        }
+        _keptOff = _startedOnRead = false;
         _sel = PresetBox(_position);
         ShowStep();
     }
+
+    /// <summary>The read region in this window's DIPs, in step 2.</summary>
+    Edges? ReadDip => _step == 2 && _readPx is { } read ? Edges.Of(ToDip(read)) : null;
 
     void OnNext(object sender, RoutedEventArgs e) => Next();
 
@@ -229,9 +251,24 @@ public partial class RegionSelectWindow : Window
             EnterDisplayStep();
             return;
         }
-        var display = new DisplayPick(_position, _position == SubtitlePosition.Custom ? px : null, _background, _backgroundOpacity, _outline);
-        Finish(new RegionPick(_readPx!.Value, display));
+        Finish(DisplayPickOf(px));
     }
+
+    /// <summary>Step 2's result for the box at <paramref name="px"/>.</summary>
+    RegionPick DisplayPickOf(DRect px)
+    {
+        // DIPs rounded to pixels can land one pixel on the region: the saved box keeps off it too.
+        if (_avoid && _position == SubtitlePosition.Custom && _readPx is { } readPx && Edges.Of(px).Overlaps(Edges.Of(readPx)))
+            px = RegionRules.PushOut(Edges.Of(px), Edges.Of(readPx), Edges.Of(_screen.Bounds)).ToDRect();
+        var display = new DisplayPick(_position, _position == SubtitlePosition.Custom ? px : null, _background, _backgroundOpacity, _outline);
+        return new RegionPick(_readPx!.Value, display);
+    }
+
+    /// <summary>The self-test: what Done would give now in step 2 (a window not shown as a dialog cannot end with a result).</summary>
+    internal RegionPick? PendingPick => _step == 2 && _sel is { } sel && _readPx is not null ? DisplayPickOf(ToPx(sel)) : null;
+
+    /// <summary>The self-test: whether "over the original" can be picked.</summary>
+    internal bool OverPresetEnabled => _presets.First(p => p.Position == SubtitlePosition.OverRegion).Button.IsEnabled;
 
     void Finish(RegionPick pick)
     {
@@ -267,6 +304,13 @@ public partial class RegionSelectWindow : Window
         foreach (var position in PresetOrder)
         {
             var button = new ToggleButton { Content = Loc.Instance["Region.Preset." + position], Margin = new Thickness(0, 0, 2, 0) };
+            if (_avoid && position == SubtitlePosition.OverRegion)
+            {
+                // Shared on screen: the app's own OCR would read the translation over the original.
+                button.IsEnabled = false;
+                button.ToolTip = Loc.Instance["Region.OverOffShared"];
+                ToolTipService.SetShowOnDisabled(button, true);
+            }
             button.Click += (_, _) => PickPreset(position);
             _presets.Add((button, position));
             Presets.Children.Add(button);
@@ -332,7 +376,9 @@ public partial class RegionSelectWindow : Window
 
     void PickPreset(SubtitlePosition position)
     {
+        if (_avoid && position == SubtitlePosition.OverRegion) return;
         _position = position;
+        _keptOff = _startedOnRead = false;
         _sel = PresetBox(position);
         SyncPanels();
         Layout();
@@ -345,7 +391,8 @@ public partial class RegionSelectWindow : Window
         if (position == SubtitlePosition.Custom && _custom is { } custom) return custom;
         var read = _readPx ?? new DRect(_screen.Bounds.Left + _screen.Bounds.Width / 5, _screen.Bounds.Bottom - _screen.Bounds.Height / 5,
             _screen.Bounds.Width * 3 / 5, _screen.Bounds.Height / 10);
-        var style = SubtitleStyle.From(_look) with { Position = position == SubtitlePosition.Custom ? SubtitlePosition.AboveRegion : position, AvoidRegion = false };
+        // Where the overlay would really put it: in Shared mode a preset landing on the region (bottom centre) gives way.
+        var style = SubtitleStyle.From(_look) with { Position = position == SubtitlePosition.Custom ? SubtitlePosition.AboveRegion : position, AvoidRegion = _avoid };
         double scale = Scale;
         int width = SubtitlePlacement.MaxWidthPx(style, read, _screen.Bounds, scale);
         int height = (int)Math.Round((Math.Clamp(_look.FontSize, 10, 80) * 1.36 * 2 + 22) * scale);
@@ -367,6 +414,14 @@ public partial class RegionSelectWindow : Window
             Next();
             return;
         }
+        // Shared mode: a new box cannot start on the read region; the chip says to start beside it.
+        _startedOnRead = hit == Drag.None && _avoid && ReadDip is { } read && read.Contains(p.X, p.Y);
+        if (_startedOnRead)
+        {
+            Layout();
+            return;
+        }
+        _keptOff = false;
         _drag = hit == Drag.None ? Drag.New : hit;
         _dragStart = p;
         _dragFrom = _sel ?? new Rect(p, p);
@@ -383,9 +438,43 @@ public partial class RegionSelectWindow : Window
             Cursor = CursorFor(HitTest(p));
             return;
         }
-        _sel = Dragged(p);
+        _sel = KeptOffRead(Dragged(p), p);
         Layout();
     }
+
+    /// <summary>
+    /// Shared mode, step 2: the box being drawn, moved or resized stops at the read region's edge, on the side it came
+    /// from (see <see cref="RegionRules"/>). Elsewhere the box is as dragged.
+    /// </summary>
+    Rect KeptOffRead(Rect next, Point p)
+    {
+        if (!_avoid || ReadDip is not { } read) return next;
+        var from = Edges.Of(_sel ?? _dragFrom);
+        var wanted = Edges.Of(next);
+        var kept = _drag switch
+        {
+            Drag.Move => RegionRules.ClampMove(wanted, from, read, Edges.Of(Area)),
+            // A new box grows from where it was started, towards the pointer.
+            Drag.New => RegionRules.ClampResize(wanted, new Edges(_dragStart.X, _dragStart.Y, _dragStart.X, _dragStart.Y), read,
+                (p.X >= _dragStart.X ? Sides.Right : Sides.Left) | (p.Y >= _dragStart.Y ? Sides.Bottom : Sides.Top)),
+            _ => RegionRules.ClampResize(wanted, from, read, SidesOf(_drag)),
+        };
+        _keptOff = kept != wanted;
+        return kept.ToRect();
+    }
+
+    static Sides SidesOf(Drag drag) => drag switch
+    {
+        Drag.Left => Sides.Left,
+        Drag.Right => Sides.Right,
+        Drag.Top => Sides.Top,
+        Drag.Bottom => Sides.Bottom,
+        Drag.TopLeft => Sides.Top | Sides.Left,
+        Drag.TopRight => Sides.Top | Sides.Right,
+        Drag.BottomLeft => Sides.Bottom | Sides.Left,
+        Drag.BottomRight => Sides.Bottom | Sides.Right,
+        _ => Sides.None,
+    };
 
     void OnMouseUp(object sender, MouseButtonEventArgs e)
     {
@@ -489,9 +578,21 @@ public partial class RegionSelectWindow : Window
                 double step = Keyboard.Modifiers.HasFlag(ModifierKeys.Control) ? 10 : 1;
                 double dx = key == Key.Left ? -step : key == Key.Right ? step : 0;
                 double dy = key == Key.Up ? -step : key == Key.Down ? step : 0;
-                _sel = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift)
+                bool resize = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
+                var next = resize
                     ? new Rect(sel.X, sel.Y, Math.Max(4, sel.Width + dx), Math.Max(4, sel.Height + dy))
                     : new Rect(Math.Clamp(sel.X + dx, 0, Math.Max(0, ActualWidth - sel.Width)), Math.Clamp(sel.Y + dy, 0, Math.Max(0, ActualHeight - sel.Height)), sel.Width, sel.Height);
+                _keptOff = false;
+                if (_avoid && ReadDip is { } read)
+                {
+                    // Shift+arrows move the right and bottom edges; arrows move the whole box.
+                    var kept = resize
+                        ? RegionRules.ClampResize(Edges.Of(next), Edges.Of(sel), read, Sides.Right | Sides.Bottom)
+                        : RegionRules.ClampMove(Edges.Of(next), Edges.Of(sel), read, Edges.Of(Area));
+                    _keptOff = kept != Edges.Of(next);
+                    next = kept.ToRect();
+                }
+                _sel = next;
                 Changed();
                 break;
             default:
@@ -652,13 +753,20 @@ public partial class RegionSelectWindow : Window
     {
         if (_readPx is not { } read || _sel is not { } sel) return;
         var px = ToPx(sel);
-        bool covers = _position == SubtitlePosition.OverRegion || px.IntersectsWith(read);
-        bool shared = _look.DisplayMode == DisplayMode.Shared && _look.Share.Subtitles;
-        string text = !covers ? Loc.Instance["Region.ClearOfRead"] : shared ? Loc.Instance["Region.CoversShared"] : Loc.Instance["Region.CoversPrivate"];
+        bool covers = _position == SubtitlePosition.OverRegion || Edges.Of(px).Overlaps(Edges.Of(read));
+        string text;
+        Color dot;
+        if (_avoid && _startedOnRead)
+            (text, dot) = (Loc.Instance["Region.StartOutside"], Color.FromRgb(0xFC, 0xE1, 0x00));
+        else if (_avoid && _keptOff)
+            (text, dot) = (Loc.Instance["Region.KeptOff"], Color.FromRgb(0xFC, 0xE1, 0x00));
+        else if (!covers)
+            (text, dot) = (Loc.Instance["Region.ClearOfRead"], Color.FromRgb(0x6C, 0xCB, 0x5F));
+        else
+            (text, dot) = _avoid ? (Loc.Instance["Region.CoversShared"], Color.FromRgb(0xFC, 0xE1, 0x00))
+                : (Loc.Instance["Region.CoversPrivate"], Color.FromRgb(0x60, 0xCD, 0xFF));
         StatusText.Text = text;
-        StatusDot.Fill = !covers ? new SolidColorBrush(Color.FromRgb(0x6C, 0xCB, 0x5F))
-            : shared ? new SolidColorBrush(Color.FromRgb(0xFC, 0xE1, 0x00))
-            : new SolidColorBrush(Color.FromRgb(0x60, 0xCD, 0xFF));
+        StatusDot.Fill = new SolidColorBrush(dot);
         StatusChip.Visibility = Visibility.Visible;
     }
 

@@ -17,8 +17,14 @@
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <DockPanel Grid.Row="0" Margin="0,0,0,8">
-            <ui:Button DockPanel.Dock="Right" VerticalAlignment="Center" Icon="{ui:SymbolIcon ArrowClockwise24}" Command="{Binding RefreshCommand}"
-                       Content="{Binding [History.Refresh], Source={x:Static l:Loc.Instance}}"/>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <ui:Button Margin="0,0,6,0" Icon="{ui:SymbolIcon Delete24}" Command="{Binding RemoveCommand}"
+                           Content="{Binding [History.Remove], Source={x:Static l:Loc.Instance}}"/>
+                <ui:Button Margin="0,0,6,0" Icon="{ui:SymbolIcon Broom24}" Command="{Binding ClearCommand}"
+                           Content="{Binding [History.Clear], Source={x:Static l:Loc.Instance}}"/>
+                <ui:Button Icon="{ui:SymbolIcon ArrowClockwise24}" Command="{Binding RefreshCommand}"
+                           Content="{Binding [History.Refresh], Source={x:Static l:Loc.Instance}}"/>
+            </StackPanel>
             <TextBlock Style="{StaticResource PageTitle}" Margin="0" Text="{Binding [History.Page], Source={x:Static l:Loc.Instance}}"/>
         </DockPanel>
         <TextBlock Grid.Row="1" Style="{StaticResource Hint}" Margin="0,0,0,8" Text="{Binding [History.Hint], Source={x:Static l:Loc.Instance}}"/>

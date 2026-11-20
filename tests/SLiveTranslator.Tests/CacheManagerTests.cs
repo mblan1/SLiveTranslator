@@ -227,4 +227,34 @@ public class CacheManagerTests
         history.FixCommand.Execute(null);
         Assert.Equal(("Press [E]\nto talk", "Nhấn [E]\nđể nói chuyện"), page.Host.Fixes[^1]);
     }
+
+    [Fact]
+    public async Task The_history_removes_a_line_and_clears_after_asking()
+    {
+        using var page = new Page();
+        foreach (int id in new[] { 1, 2, 3 }) page.Host.History.Add(new SubtitleRecord(id, $"Line {id}", $"Dòng {id}", ProviderKeys.Free));
+        var history = page.Vm.History;
+        history.Refresh();
+        Assert.False(history.RemoveCommand.CanExecute(null)); // nothing selected
+        Assert.True(history.ClearCommand.CanExecute(null));
+
+        history.Selected = history.Rows.Single(r => r.Index == 2);
+        history.RemoveCommand.Execute(null);
+
+        Assert.Equal([1, 3], page.Host.History.Select(r => r.Id));
+        Assert.Equal([3, 1], history.Rows.Select(r => r.Index));
+        Assert.Equal(1, history.Selected!.Index); // the next line, ready for another Remove
+
+        page.Prompts.Confirm = false;
+        await history.ClearCommand.ExecuteAsync(null);
+        Assert.Equal(0, page.Host.HistoryClears);
+        Assert.Equal(2, history.Rows.Count);
+        Assert.Contains("2", page.Prompts.Questions.Last());
+
+        page.Prompts.Confirm = true;
+        await history.ClearCommand.ExecuteAsync(null);
+        Assert.Equal(1, page.Host.HistoryClears);
+        Assert.True(history.IsEmpty);
+        Assert.False(history.ClearCommand.CanExecute(null));
+    }
 }

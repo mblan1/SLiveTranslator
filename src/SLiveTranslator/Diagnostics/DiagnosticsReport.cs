@@ -19,6 +19,8 @@ public static class AppInfo
         (typeof(AppInfo).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
          ?? typeof(AppInfo).Assembly.GetName().Version?.ToString() ?? "?").Split('+')[0];
 
+    public const string Author = "Snw";
+
     public static string Runtime => RuntimeInformation.FrameworkDescription;
     public static string OsDescription => RuntimeInformation.OSDescription;
 }

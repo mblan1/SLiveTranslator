@@ -55,7 +55,7 @@ public class MainWindowTests
                 window.Show();
                 FocusManager.SetFocusedElement(window, box);
                 box.Text = "30"; // typed: the box keeps it to itself until Enter or leaving it
-                Assert.Equal(22, vm.Working.Overlay.FontSize);
+                Assert.Equal(SLiveTranslator.Models.OverlaySettings.DefaultFontSize, vm.Working.Overlay.FontSize);
                 Assert.False(vm.HasChanges);
 
                 MainWindow.CommitTyping(window); // Alt+F4 or the title bar's close button moves no focus

@@ -100,7 +100,11 @@ public sealed class ShareSettings : SettingsSection
 
 public sealed class OverlaySettings : SettingsSection
 {
-    public int FontSize { get; set; } = 22;
+    /// <summary>The subtitle size a new install starts with (22 until schema 3, see <see cref="SettingsStore.CurrentSchemaVersion"/>).</summary>
+    public const int DefaultFontSize = 12;
+
+    /// <summary>The newest line's size in DIPs (px at 100 %); older lines and the original are drawn a little smaller.</summary>
+    public int FontSize { get; set; } = DefaultFontSize;
     public int MaxLines { get; set; } = 3;
     public double TextOpacity { get; set; } = 1.0;
 

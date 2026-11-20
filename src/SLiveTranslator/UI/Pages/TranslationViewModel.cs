@@ -18,7 +18,7 @@ namespace SLiveTranslator.UI.Pages;
 public sealed class TranslationViewModel : ObservableObject
 {
     /// <summary>A Witcher line in the game's language for "Test translation".</summary>
-    public const string SampleLine = "Wind's howling. We should find shelter for Roach before nightfall, Ciri.";
+    public const string SampleLine = "Wind's howling. We should find shelter before nightfall, captain.";
 
     public const int MinContextLines = 2, MaxContextLines = 10;
 

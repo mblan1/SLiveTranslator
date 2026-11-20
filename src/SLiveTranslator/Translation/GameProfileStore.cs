@@ -13,12 +13,19 @@ namespace SLiveTranslator.Translation;
 
 /// <summary>
 /// The game profiles in <see cref="DataPaths.ProfilesDir"/>. The profiles shipped with the app (embedded
-/// Assets/Profiles/*.json) are written there on first use. A shipped profile whose file the user never changed is
-/// replaced when a newer version ships; a changed one is never overwritten. Whether a file is unchanged is told by
-/// the hash of what was written, kept in <see cref="SeedStateFile"/>.
+/// Assets/Profiles/*.json; none since 2.1) are written there on first use. A shipped profile whose file the user never
+/// changed is replaced when a newer version ships, and deleted when it is no longer shipped (<see cref="RetiredSeeds"/>);
+/// a changed one is never overwritten or deleted. Whether a file is unchanged is told by the hash of what was written,
+/// kept in <see cref="SeedStateFile"/>.
 /// </summary>
 public sealed class GameProfileStore
 {
+    /// <summary>Profiles shipped before and no longer: an unchanged copy is deleted at the next start.</summary>
+    internal static readonly string[] RetiredSeeds = ["witcher3.json"];
+
+    /// <summary>In <see cref="SeedStateFile"/>: the user removed this shipped profile, so it is never written again.</summary>
+    const string RemovedMark = "removed";
+
     /// <summary><see cref="Models.TranslationSettings.ProfileId"/>: pick the profile by the game's process.</summary>
     public const string Auto = "";
 
@@ -41,27 +48,86 @@ public sealed class GameProfileStore
 
     string _dir;
     readonly IReadOnlyDictionary<string, byte[]> _seeds;
+    readonly IReadOnlyCollection<string> _retired;
     readonly object _gate = new();
     volatile Loaded? _loaded;
 
     /// <summary>The profiles read and the file each came from; replaced whole, so readers never lock.</summary>
-    sealed record Loaded(GameProfile[] Profiles, Dictionary<GameProfile, string> Files, string[] Problems);
+    /// <param name="Retired">Ids of the no-longer-shipped profiles deleted when the folder was read.</param>
+    sealed record Loaded(GameProfile[] Profiles, Dictionary<GameProfile, string> Files, string[] Problems, string[] Retired);
 
-    public GameProfileStore(string dir) : this(dir, EmbeddedSeeds())
+    public GameProfileStore(string dir) : this(dir, EmbeddedSeeds(), RetiredSeeds)
     {
     }
 
     /// <param name="seeds">File name → content of the profiles shipped with the app.</param>
-    internal GameProfileStore(string dir, IReadOnlyDictionary<string, byte[]> seeds)
+    /// <param name="retired">File names of profiles shipped before and no longer.</param>
+    internal GameProfileStore(string dir, IReadOnlyDictionary<string, byte[]> seeds, IReadOnlyCollection<string> retired)
     {
         _dir = dir;
         _seeds = seeds;
+        _retired = retired;
     }
 
     public IReadOnlyList<GameProfile> Profiles => Load().Profiles;
 
     /// <summary>Files that could not be read or saved; already logged.</summary>
     public IReadOnlyList<string> Problems => Load().Problems;
+
+    /// <summary>Ids of profiles no longer shipped whose unchanged copy was deleted when the folder was read.</summary>
+    public IReadOnlyList<string> Retired => Load().Retired;
+
+    /// <summary>
+    /// What a setting naming a profile that went away should become: <see cref="Auto"/> for a retired one (the user
+    /// had not picked a profile of their own), null when the setting is fine as it is.
+    /// </summary>
+    public string? ReplacementFor(string profileId)
+    {
+        string id = profileId.Trim();
+        if (id.Length == 0 || id.Equals(Off, StringComparison.OrdinalIgnoreCase) || Find(id) is not null) return null;
+        return Retired.Contains(id, StringComparer.OrdinalIgnoreCase) ? Auto : null;
+    }
+
+    /// <summary>
+    /// Deletes a profile's file. A shipped profile is recorded as removed, so it is not written again at the next start.
+    /// </summary>
+    /// <returns>False when no profile has this id.</returns>
+    /// <exception cref="IOException">The file could not be deleted (nothing changed).</exception>
+    public bool Delete(string id)
+    {
+        lock (_gate)
+        {
+            var loaded = Load();
+            var profile = loaded.Profiles.FirstOrDefault(p => p.Id.Equals(id.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (profile is null) return false;
+            if (loaded.Files.TryGetValue(profile, out var file))
+            {
+                File.Delete(file);
+                string name = Path.GetFileName(file);
+                if (_seeds.ContainsKey(name)) MarkRemoved(name);
+                Log.Write($"profiles: {name} ({profile.Id}) removed");
+            }
+            var files = new Dictionary<GameProfile, string>(loaded.Files, ReferenceEqualityComparer.Instance);
+            files.Remove(profile);
+            _loaded = loaded with { Profiles = loaded.Profiles.Where(p => !ReferenceEquals(p, profile)).ToArray(), Files = files };
+            return true;
+        }
+    }
+
+    void MarkRemoved(string fileName)
+    {
+        string statePath = Path.Combine(_dir, SeedStateFile);
+        var state = ReadState(statePath);
+        state[fileName] = RemovedMark;
+        try
+        {
+            WriteAtomic(statePath, JsonSerializer.SerializeToUtf8Bytes(state, JsonOptions));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Log.Warn("profiles: " + SeedStateFile + " not saved, so a removed shipped profile comes back: " + ex.Message);
+        }
+    }
 
     public GameProfile? Find(string id) =>
         Profiles.FirstOrDefault(p => p.Id.Equals(id.Trim(), StringComparison.OrdinalIgnoreCase));
@@ -197,10 +263,11 @@ public sealed class GameProfileStore
     Loaded Read()
     {
         var problems = new List<string>();
+        var retired = new List<string>();
         try
         {
             Directory.CreateDirectory(_dir);
-            WriteSeeds(problems);
+            WriteSeeds(problems, retired);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -232,19 +299,24 @@ public sealed class GameProfileStore
                 Problem(problems, Loc.F("Profiles.Unreadable", Path.GetFileName(path), ex.Message));
             }
         }
-        return new Loaded(profiles.ToArray(), files, problems.ToArray());
+        return new Loaded(profiles.ToArray(), files, problems.ToArray(), retired.ToArray());
     }
 
-    /// <summary>Writes each shipped profile that is missing, or outdated and never changed by the user.</summary>
-    void WriteSeeds(List<string> problems)
+    /// <summary>
+    /// Writes each shipped profile that is missing (unless the user removed it), or outdated and never changed by the
+    /// user; deletes each retired one the user never changed.
+    /// </summary>
+    /// <param name="retired">Gets the ids of the retired profiles deleted.</param>
+    void WriteSeeds(List<string> problems, List<string> retired)
     {
         string statePath = Path.Combine(_dir, SeedStateFile);
         var state = ReadState(statePath);
-        bool changed = false;
+        bool changed = RetireSeeds(state, retired);
         foreach (var (fileName, seed) in _seeds)
         {
             string path = Path.Combine(_dir, fileName);
             string seedHash = Hash(seed);
+            if (state.TryGetValue(fileName, out var mark) && mark == RemovedMark) continue;
             if (File.Exists(path))
             {
                 byte[] current = File.ReadAllBytes(path);
@@ -265,6 +337,56 @@ public sealed class GameProfileStore
         {
             // Without the record a shipped file counts as changed by the user: it is kept, never overwritten.
             Problem(problems, Loc.F("Profiles.SeedStateNotSaved", ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// A profile shipped before and no longer: its copy is deleted when it is still exactly as written (the hash in the
+    /// state), kept when the user changed it; either way it is no longer tracked. A file that cannot be deleted stays
+    /// tracked, so the next start tries again.
+    /// </summary>
+    /// <returns>Whether the state changed.</returns>
+    bool RetireSeeds(Dictionary<string, string> state, List<string> retired)
+    {
+        bool changed = false;
+        foreach (var fileName in _retired)
+        {
+            if (_seeds.ContainsKey(fileName) || !state.TryGetValue(fileName, out var written)) continue;
+            string path = Path.Combine(_dir, fileName);
+            try
+            {
+                if (written != RemovedMark && File.Exists(path))
+                {
+                    byte[] current = File.ReadAllBytes(path);
+                    if (Hash(current) == written)
+                    {
+                        string? id = IdOf(current);
+                        File.Delete(path);
+                        if (id is not null) retired.Add(id);
+                        Log.Write($"profiles: {fileName} is no longer shipped and was never changed: deleted");
+                    }
+                    else Log.Write($"profiles: {fileName} is no longer shipped; kept, as it was changed");
+                }
+                state.Remove(fileName);
+                changed = true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                Log.Warn($"profiles: {fileName} could not be deleted: {ex.Message}");
+            }
+        }
+        return changed;
+    }
+
+    static string? IdOf(byte[] json)
+    {
+        try
+        {
+            return Parse(json).Id is { Length: > 0 } id ? id : null;
+        }
+        catch (Exception)
+        {
+            return null;
         }
     }
 

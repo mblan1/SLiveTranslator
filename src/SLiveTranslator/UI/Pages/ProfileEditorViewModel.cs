@@ -37,6 +37,8 @@ public sealed class ProfileEditorViewModel : ObservableObject
         NewCommand = new RelayCommand(NewProfile, () => !IsDirty);
         ImportCommand = new AsyncRelayCommand(ImportAsync, () => !IsDirty);
         ExportCommand = new RelayCommand(Export, () => _copy is not null);
+        RemoveProfileCommand = new AsyncRelayCommand(RemoveProfileAsync, () => _target is not null);
+        ClearProfileCommand = new AsyncRelayCommand(ClearProfileAsync, () => _copy is not null);
         Keep = Rows<KeepRow>([], () => new KeepRow(""));
         Glossary = Rows<GlossaryRow>([], () => new GlossaryRow(new GlossaryEntry()));
         Characters = Rows<CharacterRow>([], () => new CharacterRow(new GameCharacter(), Edited));
@@ -122,6 +124,19 @@ public sealed class ProfileEditorViewModel : ObservableObject
     public AsyncRelayCommand ImportCommand { get; }
     public RelayCommand ExportCommand { get; }
 
+    /// <summary>Deletes the profile's file (after asking); the setting that picked it goes back to automatic.</summary>
+    public AsyncRelayCommand RemoveProfileCommand { get; }
+
+    /// <summary>Empties the profile's lists (after asking): keep, glossary, characters, fix rules and style; saved with Save.</summary>
+    public AsyncRelayCommand ClearProfileCommand { get; }
+
+    /// <summary>False when there is no profile at all (none ships with the app): the page asks for New or Import.</summary>
+    public bool HasProfile => _copy is not null;
+
+    static string Title => Loc.Instance["Profile.Title"];
+
+    static string NameOf(GameProfile profile) => profile.Name.Trim().Length > 0 ? profile.Name.Trim() : profile.Id;
+
     /// <summary>The edited profile as it would be saved: the grids' rows, blank ones left out.</summary>
     public GameProfile? Build()
     {
@@ -184,7 +199,50 @@ public sealed class ProfileEditorViewModel : ObservableObject
         IsDirty = false;
         OnPropertyChanged(string.Empty);
         ExportCommand.NotifyCanExecuteChanged();
+        RemoveProfileCommand.NotifyCanExecuteChanged();
+        ClearProfileCommand.NotifyCanExecuteChanged();
         _root.Edited();
+    }
+
+    async Task RemoveProfileAsync()
+    {
+        if (_target is not { } target) return;
+        string name = NameOf(target);
+        if (!await _root.Prompts.ConfirmAsync(Title, Loc.F("Profile.RemoveAsk", name), Loc.Instance["Profile.RemoveProfile"], Loc.Instance["Dialog.Cancel"]))
+            return;
+        try
+        {
+            _store.Delete(target.Id);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _root.Prompts.Show(Title, Loc.F("Profile.RemoveFailed", name, ex.Message), MessageKind.Error);
+            return;
+        }
+        // The setting named it: translation goes back to picking a profile by the game (saved with the other settings).
+        if (Settings.ProfileId.Trim().Equals(target.Id, StringComparison.OrdinalIgnoreCase)) Settings.ProfileId = GameProfileStore.Auto;
+        OnPropertyChanged(nameof(Profiles));
+        Reload();
+        Load(_store.Profiles.FirstOrDefault());
+        _root.Prompts.Show(Title, Loc.F("Profile.Removed", name), MessageKind.Success);
+    }
+
+    async Task ClearProfileAsync()
+    {
+        if (_copy is null || _target is null) return;
+        if (!await _root.Prompts.ConfirmAsync(Title, Loc.F("Profile.ClearAsk", NameOf(_target)), Loc.Instance["Profile.ClearProfile"], Loc.Instance["Dialog.Cancel"]))
+            return;
+        _copy.Style = []; // no grid of its own: it goes with the rest
+        // New lists rather than Items.Clear(): a reset would leave the old rows' change handlers attached.
+        Keep = Rows<KeepRow>([], () => new KeepRow(""));
+        Glossary = Rows<GlossaryRow>([], () => new GlossaryRow(new GlossaryEntry()));
+        Characters = Rows<CharacterRow>([], () => new CharacterRow(new GameCharacter(), Edited));
+        FixRules = Rows<FixRuleRow>([], () => new FixRuleRow(new FixRule()));
+        OnPropertyChanged(nameof(Keep));
+        OnPropertyChanged(nameof(Glossary));
+        OnPropertyChanged(nameof(Characters));
+        OnPropertyChanged(nameof(FixRules));
+        Edited();
     }
 
     RowList<T> Rows<T>(IEnumerable<T> rows, Func<T> create) where T : ObservableObject => new(rows, create, Edited);

@@ -41,7 +41,8 @@ public sealed class LabelsOverlay : ClickThroughWindow
                 {
                     Text = text,
                     Foreground = OverlayLook.Text,
-                    FontSize = Math.Clamp(lineHeight * 0.72, 10, Math.Max(12, baseFontSize * 1.6)),
+                    // The text's own height decides; the subtitle size only raises the cap (35 = the cap of the old 22 default).
+                    FontSize = Math.Clamp(lineHeight * 0.72, 10, Math.Max(35, baseFontSize * 1.6)),
                     FontFamily = OverlayLook.Font,
                     TextWrapping = TextWrapping.Wrap,
                     MaxWidth = Math.Max(r.Width + 24, 240),

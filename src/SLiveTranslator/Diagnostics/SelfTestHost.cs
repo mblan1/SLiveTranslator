@@ -26,10 +26,22 @@ internal sealed class SelfTestHost : ISettingsHost
     public SelfTestHost(string dir)
     {
         Profiles = new GameProfileStore(Path.Combine(dir, "Profiles"));
+        // No profile ships with the app: a small one of the user's kind, so the Game profile page has something to show.
+        if (Profiles.Find("sample") is null)
+            Profiles.Save(new GameProfile
+            {
+                Id = "sample",
+                Name = "Sample game",
+                ProcessNames = ["samplegame"],
+                Keep = ["Lantern Bay", "Mira"],
+                Glossary = [new GlossaryEntry { En = "harbor master", Vi = "trưởng cảng" }],
+                Characters = [new GameCharacter { Name = "Mira", Gender = "female", About = "the captain" }],
+                FixRules = [new FixRule { Trigger = "captain", Wrong = "đội trưởng", Right = "thuyền trưởng" }],
+            });
         DataFolders = new DataFolderMover(Path.Combine(dir, "AppData"), Path.GetDirectoryName(Environment.ProcessPath));
         _cache = new CachedTranslator(new NoTranslator(), Path.Combine(dir, "cache.json"));
         _cache.Set(ProviderKeys.Free, "en", "vi", "Wind's howling.", "Gió đang rít.");
-        _cache.SetUserOverride("en", "vi", "Roach", "Roach");
+        _cache.SetUserOverride("en", "vi", "Lantern Bay", "Lantern Bay");
         _cache.Set("claude/claude-opus-5-5", "en", "vi", "We should find shelter before nightfall.", "Ta nên tìm chỗ trú trước khi trời tối.");
     }
 
@@ -172,7 +184,7 @@ internal sealed class SelfTestHost : ISettingsHost
     [
         new(1, "Wind's howling.", "Gió đang rít.", ProviderKeys.Free),
         new(2, "We should find shelter before nightfall.", "Ta nên tìm chỗ trú trước khi trời tối.", "claude/claude-opus-5-5"),
-        new(3, "Roach is tired, and so am I.", null, null),
+        new(3, "The road is long, and I am tired.", null, null),
     ];
 
     public (string Src, string Tgt) Languages => ("en", "vi");

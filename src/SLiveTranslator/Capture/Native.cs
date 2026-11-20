@@ -25,6 +25,14 @@ internal static class Native
     public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9;
     public const int WM_HOTKEY = 0x0312;
     public const int WM_GETMINMAXINFO = 0x0024;
+
+    /// <summary>Sent before a click activates a window; <see cref="MA_NOACTIVATE"/> keeps the click and the window behind in front.</summary>
+    public const int WM_MOUSEACTIVATE = 0x0021;
+    public const int MA_NOACTIVATE = 3;
+    public const int VK_LBUTTON = 0x01, VK_RBUTTON = 0x02, VK_MBUTTON = 0x04;
+
+    /// <summary>The key's state now, wherever the input goes (the high bit: held down).</summary>
+    [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int vKey);
     public const uint MOD_ALT = 1, MOD_CONTROL = 2, MOD_SHIFT = 4, MOD_WIN = 8, MOD_NOREPEAT = 0x4000;
     public const int ATTACH_PARENT_PROCESS = -1;
     public const uint GA_ROOT = 2;

@@ -9,6 +9,10 @@ using SLiveTranslator.Models;
 
 namespace SLiveTranslator.Hotkeys;
 
+/// <summary>A key taken while an overlay is open (see <see cref="HotkeyManager.Grab"/>).</summary>
+/// <param name="Repeat">Held down, it fires again and again (the arrows); otherwise once per press.</param>
+public sealed record GrabKey(HotkeyGesture Gesture, Action Pressed, bool Repeat = false);
+
 /// <summary>
 /// System-wide hotkeys (RegisterHotKey) delivered on the UI thread through a message-only window. Keeps the result of
 /// each action's last registration for the settings page. Call on the thread that made it.
@@ -44,6 +48,9 @@ public sealed class HotkeyManager : IDisposable
         Key.OemOpenBrackets, Key.OemPipe, Key.OemCloseBrackets, Key.OemQuotes, Key.Oem8, Key.OemBackslash,
     ];
 
+    /// <summary>The first id of the keys taken for a while (<see cref="Grab"/>); the actions' ids stay below it.</summary>
+    const int FirstGrabId = 0xB000;
+
     sealed record Request(string Gesture, Action Callback, bool Disabled);
 
     readonly HwndSource _source;
@@ -51,6 +58,7 @@ public sealed class HotkeyManager : IDisposable
     readonly Dictionary<HotkeyAction, HotkeyResult> _states = new();
     readonly Dictionary<HotkeyAction, (int Id, HotkeyGesture Gesture)> _held = new();
     readonly Dictionary<int, Action> _callbacks = new();
+    readonly HashSet<int> _grabIds = new();
     int _nextId = 1;
 
     public HotkeyManager()
@@ -166,6 +174,8 @@ public sealed class HotkeyManager : IDisposable
         HotkeyGesture.TryParse(request.Gesture, out var gesture);
         if (TakenByAnother(action, gesture)) return HotkeyResult.Duplicate;
         if (Suspended) return HotkeyResult.Ok;
+        if (_nextId >= FirstGrabId) _nextId = 1; // after many re-registrations: the ids in use were all released by then
+        while (_callbacks.ContainsKey(_nextId)) _nextId++;
         if (!TryRegister(_nextId, gesture, out var result)) return result;
         int id = _nextId++;
         _held[action] = (id, gesture);
@@ -201,6 +211,73 @@ public sealed class HotkeyManager : IDisposable
         foreach (var action in _held.Keys.ToList()) Release(action);
     }
 
+    /// <summary>
+    /// Takes plain keys (arrows, Enter, Esc, digits) for as long as an overlay is open, the in-game menu: they reach it
+    /// while the game keeps the focus. No validation (plain keys are the point), no action, untouched by
+    /// <see cref="Suspend"/> and <see cref="RegisterAll"/>; disposing the grab gives the keys back. A key another
+    /// program holds, or that is one of this manager's action hotkeys, is in <see cref="KeyGrab.Missed"/>.
+    /// </summary>
+    public KeyGrab Grab(IReadOnlyList<GrabKey> keys)
+    {
+        var ids = new List<int>();
+        var missed = new List<HotkeyGesture>();
+        foreach (var key in keys)
+        {
+            int id = NextGrabId();
+            if (id < 0 || _held.Values.Any(h => h.Gesture == key.Gesture))
+            {
+                missed.Add(key.Gesture);
+                continue;
+            }
+            uint modifiers = key.Gesture.NativeModifiers | (key.Repeat ? 0 : Native.MOD_NOREPEAT);
+            if (!Native.RegisterHotKey(_source.Handle, id, modifiers, key.Gesture.VirtualKey))
+            {
+                missed.Add(key.Gesture);
+                continue;
+            }
+            _grabIds.Add(id);
+            _callbacks[id] = key.Pressed;
+            ids.Add(id);
+        }
+        return new KeyGrab(this, ids, missed);
+    }
+
+    int NextGrabId()
+    {
+        for (int id = FirstGrabId; id < ProbeId; id++)
+            if (!_grabIds.Contains(id)) return id;
+        return -1;
+    }
+
+    void Release(IReadOnlyList<int> grabIds)
+    {
+        foreach (int id in grabIds)
+        {
+            if (!_grabIds.Remove(id)) continue;
+            Native.UnregisterHotKey(_source.Handle, id);
+            _callbacks.Remove(id);
+        }
+    }
+
+    /// <summary>Keys taken by <see cref="Grab"/>; dispose to give them back.</summary>
+    public sealed class KeyGrab : IDisposable
+    {
+        readonly HotkeyManager _owner;
+        readonly IReadOnlyList<int> _ids;
+
+        internal KeyGrab(HotkeyManager owner, IReadOnlyList<int> ids, IReadOnlyList<HotkeyGesture> missed)
+        {
+            _owner = owner;
+            _ids = ids;
+            Missed = missed;
+        }
+
+        /// <summary>The keys that could not be taken (another program holds them, or they are the app's own hotkeys).</summary>
+        public IReadOnlyList<HotkeyGesture> Missed { get; }
+
+        public void Dispose() => _owner.Release(_ids);
+    }
+
     IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (msg == Native.WM_HOTKEY && _callbacks.TryGetValue(wParam.ToInt32(), out var callback))
@@ -213,6 +290,7 @@ public sealed class HotkeyManager : IDisposable
 
     public void Dispose()
     {
+        Release(_grabIds.ToList());
         UnregisterAll();
         _source.RemoveHook(WndProc);
         _source.Dispose();

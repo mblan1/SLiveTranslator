@@ -54,7 +54,7 @@ public sealed record SubtitleStyle(double TextOpacity, double BackgroundOpacity,
         TextOutline = settings.TextOutline,
         Align = settings.Align,
         DisplayRegion = settings.DisplayRegion?.ToRectangle(),
-        AvoidRegion = settings.DisplayMode == DisplayMode.Shared && settings.Share.Subtitles,
+        AvoidRegion = Overlay.RegionRules.MustAvoid(settings),
         FadeIn = SubtitleTiming.Fade(settings.FadeInMs),
         TimeLeftBar = settings.TimeLeftBar && settings.Stay != StayMode.UntilNext,
     };

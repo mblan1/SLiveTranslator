@@ -58,7 +58,7 @@ public class ProfileEditorTests
         Assert.Equal(1, inUse.Version);
         Assert.Single(host.Profiles.Profiles, p => p.Id == "witcher3");
 
-        var reread = new GameProfileStore(dir.File("Profiles")).Find("witcher3")!;
+        var reread = TestProfiles.Store(dir.File("Profiles")).Find("witcher3")!;
         Assert.Equal(2, reread.Version);
         Assert.Equal("The Witcher 3", reread.Name);
         Assert.Equal("Jaskier", reread.Keep[^1]);
@@ -137,7 +137,7 @@ public class ProfileEditorTests
         Assert.Equal(typo, File.ReadAllText(Path.Combine(profiles, "custom.json")));
         Assert.Equal("not a profile yet", File.ReadAllText(Path.Combine(profiles, "gwent.json")));
         Assert.Equal("Gwent", host.Profiles.Find("gwent")!.Name);
-        Assert.Equal(["custom-2", "gwent", "witcher3"], new GameProfileStore(profiles).Profiles.Select(p => p.Id).Order());
+        Assert.Equal(["custom-2", "gwent", "witcher3"], TestProfiles.Store(profiles).Profiles.Select(p => p.Id).Order());
     }
 
     [Fact]
@@ -182,5 +182,107 @@ public class ProfileEditorTests
         Assert.Equal(MessageKind.Error, prompts.Messages.Single().Kind);
         Assert.StartsWith("broken.json could not be imported", prompts.Messages.Single().Text);
         Assert.Single(host.Profiles.Profiles);
+    }
+
+    [Fact]
+    public async Task Removing_a_profile_deletes_its_file_after_asking_and_the_setting_that_used_it_goes_back_to_automatic()
+    {
+        using var dir = new TempDir();
+        var (host, vm, prompts) = Make(dir);
+        var profiles = vm.Profiles;
+        profiles.NewCommand.Execute(null); // custom
+        string file = Path.Combine(dir.File("Profiles"), "custom.json");
+        Assert.True(File.Exists(file));
+        profiles.SelectedUse = profiles.UseChoices.Single(c => c.Value == "custom");
+        Assert.True(vm.Save());
+        Assert.Equal("custom", host.Current.Translation.ProfileId);
+
+        prompts.Confirm = false;
+        await profiles.RemoveProfileCommand.ExecuteAsync(null);
+        Assert.True(File.Exists(file)); // asked, and declined
+        Assert.Contains("custom", host.Profiles.Profiles.Select(p => p.Id));
+
+        prompts.Confirm = true;
+        await profiles.RemoveProfileCommand.ExecuteAsync(null);
+
+        Assert.False(File.Exists(file));
+        Assert.Equal(["witcher3"], host.Profiles.Profiles.Select(p => p.Id));
+        Assert.Equal(GameProfileStore.Auto, vm.Working.Translation.ProfileId);
+        Assert.Equal(GameProfileStore.Auto, profiles.SelectedUse!.Value);
+        Assert.DoesNotContain(profiles.UseChoices, c => c.Value == "custom");
+        Assert.Equal("witcher3", profiles.EditTarget!.Id); // the next profile is opened
+        Assert.Equal(MessageKind.Success, prompts.Messages.Last().Kind);
+        Assert.True(vm.HasChanges); // the profile setting is saved with the others
+        Assert.Equal("custom", host.Current.Translation.ProfileId);
+        Assert.True(vm.Save());
+        Assert.Equal(GameProfileStore.Auto, host.Current.Translation.ProfileId);
+    }
+
+    [Fact]
+    public async Task Removing_the_last_profile_leaves_the_page_asking_for_a_new_one()
+    {
+        using var dir = new TempDir();
+        var (host, vm, _) = Make(dir);
+        Assert.True(vm.Profiles.HasProfile);
+
+        await vm.Profiles.RemoveProfileCommand.ExecuteAsync(null); // witcher3, the only one
+
+        Assert.Empty(host.Profiles.Profiles);
+        Assert.False(vm.Profiles.HasProfile);
+        Assert.Null(vm.Profiles.EditTarget);
+        Assert.False(vm.Profiles.RemoveProfileCommand.CanExecute(null));
+        Assert.False(vm.Profiles.ClearProfileCommand.CanExecute(null));
+        Assert.False(vm.Profiles.ExportCommand.CanExecute(null));
+        Assert.True(vm.Profiles.NewCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Clearing_a_profile_empties_its_lists_and_is_written_on_save()
+    {
+        using var dir = new TempDir();
+        var (host, vm, prompts) = Make(dir);
+        var profiles = vm.Profiles;
+        Assert.NotEmpty(profiles.Keep.Items);
+
+        prompts.Confirm = false;
+        await profiles.ClearProfileCommand.ExecuteAsync(null);
+        Assert.NotEmpty(profiles.Keep.Items);
+        Assert.False(profiles.IsDirty);
+
+        prompts.Confirm = true;
+        await profiles.ClearProfileCommand.ExecuteAsync(null);
+        Assert.Empty(profiles.Keep.Items);
+        Assert.Empty(profiles.Glossary.Items);
+        Assert.Empty(profiles.Characters.Items);
+        Assert.Empty(profiles.FixRules.Items);
+        Assert.True(profiles.IsDirty);
+        Assert.NotEmpty(host.Profiles.Find("witcher3")!.Keep); // nothing written until Save
+
+        Assert.True(vm.Save());
+
+        var saved = TestProfiles.Store(dir.File("Profiles")).Find("witcher3")!;
+        Assert.Equal(TestProfiles.Witcher3().Name, saved.Name); // name and games stay
+        Assert.Equal(["witcher3"], saved.ProcessNames);
+        Assert.Empty(saved.Keep);
+        Assert.Empty(saved.Glossary);
+        Assert.Empty(saved.Characters);
+        Assert.Empty(saved.FixRules);
+        Assert.Empty(saved.Style);
+        profiles.Keep.AddCommand.Execute(null); // the lists still work
+        Assert.Single(profiles.Keep.Items);
+    }
+
+    [Fact]
+    public void With_no_profile_at_all_the_page_has_nothing_to_edit()
+    {
+        using var dir = new TempDir();
+        var host = new FakeHost(dir.File("Profiles"));
+        _ = host.Profiles.Profiles;
+        host.Profiles.Delete("witcher3");
+
+        var vm = new SettingsViewModel(host, new FakeScheduler().Delay);
+
+        Assert.False(vm.Profiles.HasProfile);
+        Assert.Equal([GameProfileStore.Auto, GameProfileStore.Off], vm.Profiles.UseChoices.Select(c => c.Value));
     }
 }

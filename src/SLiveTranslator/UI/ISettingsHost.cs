@@ -60,6 +60,12 @@ public interface ISettingsHost
     /// <summary>The picker with only some of its steps (see <see cref="RegionPickMode"/>).</summary>
     void SelectRegions(RegionPickMode mode) => SelectRegion();
 
+    /// <summary>
+    /// As <see cref="SelectRegions(RegionPickMode)"/>, from the main window: the picker starts from its unsaved
+    /// settings, so it follows the display mode chosen there (in Shared mode the box keeps off the read region).
+    /// </summary>
+    void SelectRegions(RegionPickMode mode, AppSettings working) => SelectRegions(mode);
+
     /// <summary>What the OCR reads in the region now (the Regions page's test); null when it cannot read.</summary>
     Task<ReadPreview?> TestReadingAsync(RegionSettings region, CancellationToken ct) => Task.FromResult<ReadPreview?>(null);
 
@@ -160,4 +166,14 @@ public interface ISettingsHost
 
     /// <summary>The overlay shows the user's fix on every line with this source (the cache holds it already).</summary>
     void ShowFix(string source, string translation);
+
+    /// <summary>Takes one line out of the session's history (and off the screen when it shows there).</summary>
+    void RemoveHistory(int id)
+    {
+    }
+
+    /// <summary>Forgets every line of the session: the history and the lines on screen. The translation cache keeps its translations.</summary>
+    void ClearHistory()
+    {
+    }
 }

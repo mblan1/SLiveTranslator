@@ -35,9 +35,9 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
@@ -46,29 +46,42 @@
                 <TextBlock Grid.Row="0" Style="{StaticResource FieldLabel}" Text="{Binding [Profile.Edit], Source={x:Static l:Loc.Instance}}"/>
                 <ComboBox Grid.Row="0" Grid.Column="1" Width="260" HorizontalAlignment="Left" ItemsSource="{Binding Profiles}"
                           SelectedItem="{Binding EditTarget}" DisplayMemberPath="Name" IsEnabled="{Binding CanSwitch}"/>
-                <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal">
-                    <ui:Button Margin="0,0,6,0" Icon="{ui:SymbolIcon DocumentAdd24}" Command="{Binding NewCommand}"
+                <WrapPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Margin="0,8,0,0">
+                    <ui:Button Margin="0,0,6,4" Icon="{ui:SymbolIcon DocumentAdd24}" Command="{Binding NewCommand}"
                                Content="{Binding [Profile.New], Source={x:Static l:Loc.Instance}}"/>
-                    <ui:Button Margin="0,0,6,0" Icon="{ui:SymbolIcon ArrowImport24}" Command="{Binding ImportCommand}"
+                    <ui:Button Margin="0,0,6,4" Icon="{ui:SymbolIcon ArrowImport24}" Command="{Binding ImportCommand}"
                                Content="{Binding [Profile.Import], Source={x:Static l:Loc.Instance}}"/>
-                    <ui:Button Icon="{ui:SymbolIcon ArrowExportLtr24}" Command="{Binding ExportCommand}"
+                    <ui:Button Margin="0,0,6,4" Icon="{ui:SymbolIcon ArrowExportLtr24}" Command="{Binding ExportCommand}"
                                Content="{Binding [Profile.Export], Source={x:Static l:Loc.Instance}}"/>
-                </StackPanel>
-                <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Style="{StaticResource Hint}"
+                    <ui:Button Margin="0,0,6,4" Icon="{ui:SymbolIcon Broom24}" Command="{Binding ClearProfileCommand}"
+                               Content="{Binding [Profile.ClearProfile], Source={x:Static l:Loc.Instance}}"/>
+                    <ui:Button Margin="0,0,0,4" Icon="{ui:SymbolIcon Delete24}" Command="{Binding RemoveProfileCommand}"
+                               Content="{Binding [Profile.RemoveProfile], Source={x:Static l:Loc.Instance}}"/>
+                </WrapPanel>
+                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Hint}"
                            Text="{Binding [Profile.SaveFirst], Source={x:Static l:Loc.Instance}}"
                            Visibility="{Binding IsDirty, Converter={StaticResource VisibleWhen}}"/>
-                <TextBlock Grid.Row="2" Margin="0,8,12,0" Style="{StaticResource FieldLabel}" Text="{Binding [Profile.Name], Source={x:Static l:Loc.Instance}}"/>
-                <ui:TextBox Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,8,0,0" MaxWidth="520" HorizontalAlignment="Stretch"
-                            Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"/>
-                <TextBlock Grid.Row="3" Margin="0,8,12,0" Style="{StaticResource FieldLabel}" Text="{Binding [Profile.Processes], Source={x:Static l:Loc.Instance}}"/>
-                <ui:TextBox Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,8,0,0" MaxWidth="520" HorizontalAlignment="Stretch"
-                            PlaceholderText="witcher3" Text="{Binding ProcessNames, UpdateSourceTrigger=PropertyChanged}"/>
+                <TextBlock Grid.Row="3" Margin="0,8,12,0" Style="{StaticResource FieldLabel}" Text="{Binding [Profile.Name], Source={x:Static l:Loc.Instance}}"
+                           Visibility="{Binding HasProfile, Converter={StaticResource VisibleWhen}}"/>
+                <ui:TextBox Grid.Row="3" Grid.Column="1" Margin="0,8,0,0" MaxWidth="520" HorizontalAlignment="Stretch"
+                            Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Visibility="{Binding HasProfile, Converter={StaticResource VisibleWhen}}"/>
+                <TextBlock Grid.Row="4" Margin="0,8,12,0" Style="{StaticResource FieldLabel}" Text="{Binding [Profile.Processes], Source={x:Static l:Loc.Instance}}"
+                           Visibility="{Binding HasProfile, Converter={StaticResource VisibleWhen}}"/>
+                <ui:TextBox Grid.Row="4" Grid.Column="1" Margin="0,8,0,0" MaxWidth="520" HorizontalAlignment="Stretch"
+                            PlaceholderText="mygame" Text="{Binding ProcessNames, UpdateSourceTrigger=PropertyChanged}"
+                            Visibility="{Binding HasProfile, Converter={StaticResource VisibleWhen}}"/>
+                <StackPanel Grid.Row="3" Grid.RowSpan="2" Grid.ColumnSpan="2" Margin="0,12,0,4"
+                            Visibility="{Binding HasProfile, Converter={StaticResource VisibleWhen}, ConverterParameter=not}">
+                    <TextBlock Style="{StaticResource Body}" FontWeight="SemiBold" Text="{Binding [Profile.Empty], Source={x:Static l:Loc.Instance}}"/>
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding [Profile.EmptyHint], Source={x:Static l:Loc.Instance}}"/>
+                </StackPanel>
             </Grid>
         </Border>
 
-        <TextBlock Grid.Row="3" Style="{StaticResource Hint}" Margin="0,0,0,6" Text="{Binding [Profile.GridHint], Source={x:Static l:Loc.Instance}}"/>
+        <TextBlock Grid.Row="3" Style="{StaticResource Hint}" Margin="0,0,0,6" Text="{Binding [Profile.GridHint], Source={x:Static l:Loc.Instance}}"
+                   Visibility="{Binding HasProfile, Converter={StaticResource VisibleWhen}}"/>
 
-        <TabControl Grid.Row="4">
+        <TabControl Grid.Row="4" Visibility="{Binding HasProfile, Converter={StaticResource VisibleWhen}}">
             <TabItem Header="{Binding [Profile.Keep], Source={x:Static l:Loc.Instance}}">
                 <DockPanel Margin="0,8,0,0">
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">

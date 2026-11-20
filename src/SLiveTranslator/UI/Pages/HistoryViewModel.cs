@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SLiveTranslator.Translation;
@@ -48,6 +49,34 @@ public sealed class HistoryViewModel : ObservableObject
         _host = host;
         RefreshCommand = new RelayCommand(Refresh);
         FixCommand = new RelayCommand(Fix, () => Selected is not null && FixText.Trim().Length > 0);
+        RemoveCommand = new RelayCommand(Remove, () => Selected is not null);
+        ClearCommand = new AsyncRelayCommand(ClearAsync, () => !IsEmpty);
+        Refresh();
+    }
+
+    /// <summary>Takes the selected line out of the history (the cache keeps its translation and any fix).</summary>
+    public RelayCommand RemoveCommand { get; }
+
+    /// <summary>Forgets every line of the session, after asking.</summary>
+    public AsyncRelayCommand ClearCommand { get; }
+
+    void Remove()
+    {
+        if (Selected is not { } row) return;
+        int at = Rows.ToList().IndexOf(row);
+        _host.RemoveHistory(row.Index);
+        Rows = Rows.Where(r => !ReferenceEquals(r, row)).ToList();
+        OnPropertyChanged(nameof(IsEmpty));
+        ClearCommand.NotifyCanExecuteChanged();
+        Selected = Rows.Count == 0 ? null : Rows[Math.Min(at, Rows.Count - 1)]; // the next line, ready for another Remove
+    }
+
+    async Task ClearAsync()
+    {
+        if (!await _root.Prompts.ConfirmAsync(Loc.Instance["History.Page"], Loc.F("History.ClearAsk", Rows.Count),
+                Loc.Instance["History.Clear"], Loc.Instance["Dialog.Cancel"]))
+            return;
+        _host.ClearHistory();
         Refresh();
     }
 
@@ -69,6 +98,7 @@ public sealed class HistoryViewModel : ObservableObject
             if (!SetProperty(ref _selected, value)) return;
             FixText = value?.Record.Translation ?? "";
             FixCommand.NotifyCanExecuteChanged();
+            RemoveCommand.NotifyCanExecuteChanged();
         }
     }
 
@@ -91,6 +121,7 @@ public sealed class HistoryViewModel : ObservableObject
         string typed = _fixText;
         Rows = _host.HistoryRecords(Lines).Reverse().Select(r => new HistoryRowViewModel(r)).ToList();
         OnPropertyChanged(nameof(IsEmpty));
+        ClearCommand.NotifyCanExecuteChanged();
         Selected = Rows.FirstOrDefault(r => r.Index == keep);
         if (Selected is not null) FixText = typed; // the same line stays selected: what the user was typing stays too
     }

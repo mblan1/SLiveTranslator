@@ -72,18 +72,21 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <TextBlock Grid.ColumnSpan="2" Style="{StaticResource SectionTitle}" Text="{Binding [General.About], Source={x:Static l:Loc.Instance}}"/>
                 <TextBlock Grid.Row="1" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.Version], Source={x:Static l:Loc.Instance}}"/>
                 <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Body}" Text="{Binding Version}"/>
-                <TextBlock Grid.Row="2" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.Runtime], Source={x:Static l:Loc.Instance}}"/>
-                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Body}" Text="{Binding Runtime}"/>
-                <TextBlock Grid.Row="3" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.System], Source={x:Static l:Loc.Instance}}"/>
-                <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Body}" Text="{Binding OsDescription}"/>
-                <TextBlock Grid.Row="4" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.Ocr], Source={x:Static l:Loc.Instance}}"/>
-                <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Body}" Text="{Binding OcrLanguages}"/>
-                <TextBlock Grid.Row="5" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.DataFolder], Source={x:Static l:Loc.Instance}}"/>
-                <TextBox Grid.Row="5" Grid.Column="1" IsReadOnly="True" BorderThickness="0" Background="Transparent" Padding="0" TextWrapping="Wrap"
+                <TextBlock Grid.Row="2" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.Author], Source={x:Static l:Loc.Instance}}"/>
+                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Body}" Text="{Binding Author}"/>
+                <TextBlock Grid.Row="3" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.Runtime], Source={x:Static l:Loc.Instance}}"/>
+                <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Body}" Text="{Binding Runtime}"/>
+                <TextBlock Grid.Row="4" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.System], Source={x:Static l:Loc.Instance}}"/>
+                <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Body}" Text="{Binding OsDescription}"/>
+                <TextBlock Grid.Row="5" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.Ocr], Source={x:Static l:Loc.Instance}}"/>
+                <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Body}" Text="{Binding OcrLanguages}"/>
+                <TextBlock Grid.Row="6" Style="{StaticResource FieldLabel}" Margin="0,3,12,3" Text="{Binding [General.DataFolder], Source={x:Static l:Loc.Instance}}"/>
+                <TextBox Grid.Row="6" Grid.Column="1" IsReadOnly="True" BorderThickness="0" Background="Transparent" Padding="0" TextWrapping="Wrap"
                          VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorPrimaryBrush}" Text="{Binding DataFolder, Mode=OneWay}"/>
             </Grid>
         </Border>

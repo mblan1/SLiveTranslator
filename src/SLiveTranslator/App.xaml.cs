@@ -116,10 +116,20 @@ public partial class App : Application, ISettingsHost
         }
 
         // Stores a version-1 file as schema 2 right away, so a plain-text API key gets encrypted (the original stays as .bak-v1).
-        if (_store.MigratedFromV1) TrySaveSettings();
+        // An older schema is stored raised at once too (schema 3: the old default subtitle size became 12), and so are
+        // settings from before the Shared-mode rule whose translation covered the read region.
+        bool offRead = KeepTranslationOffRead() != PlacementFix.None;
+        if (_store.MigratedFromV1 || _store.Upgraded || offRead) TrySaveSettings();
 
         problems.AddRange(BuildServices());
         problems.AddRange(_profiles.Problems);
+        // A profile that is no longer shipped (Witcher 3 until 2.0) and was deleted: the setting naming it goes back to automatic.
+        if (_profiles.ReplacementFor(_settings.Translation.ProfileId) is { } replacement)
+        {
+            Log.Write($"profiles: \"{_settings.Translation.ProfileId}\" is no longer shipped; the profile setting is automatic again");
+            _settings.Translation.ProfileId = replacement;
+            TrySaveSettings();
+        }
         _overlay = new OverlayHost { Shared = SharedWindows.For(_settings.Overlay) };
         _providers.ServiceSwitched += OnServiceSwitched;
         _myMemoryUsage.Counted += OnMyMemoryCounted;
@@ -331,6 +341,7 @@ public partial class App : Application, ISettingsHost
     void OnTrayCommand(TrayItem item)
     {
         if (item.Command != TrayCommand.Exit && UpdateBlocks()) return;
+        CloseMenu();
         switch (item.Command)
         {
             case TrayCommand.Subtitles: ToggleSubtitles(); break;
@@ -403,6 +414,7 @@ public partial class App : Application, ISettingsHost
             [HotkeyAction.Clear] = OnHotkey(HotkeyAction.Clear, ClearOverlay),
             [HotkeyAction.History] = OnHotkey(HotkeyAction.History, ToggleHistory),
             [HotkeyAction.SwitchDisplayMode] = OnHotkey(HotkeyAction.SwitchDisplayMode, SwitchDisplayMode),
+            [HotkeyAction.Menu] = OnHotkey(HotkeyAction.Menu, ToggleMenu),
         });
         if (HotkeyText.Problems(results, _settings.Hotkeys) is not { } problem) return null;
         Log.Warn("hotkeys: " + string.Join(", ", results.Select(r => $"{r.Key}={_settings.Hotkeys[r.Key]}:{r.Value}")));
@@ -416,6 +428,7 @@ public partial class App : Application, ISettingsHost
     Action OnHotkey(HotkeyAction action, Action run) => () =>
     {
         if (UpdateBlocks()) return;
+        if (action != HotkeyAction.Menu) CloseMenu(); // any other hotkey: the menu goes, so what it showed is never stale
         HotkeyPressed?.Invoke(this, action);
         if (!(_hotkeyTrial && _mainWindow is { IsActive: true })) run();
     };
@@ -429,6 +442,7 @@ public partial class App : Application, ISettingsHost
         }
         _screenCts?.Cancel();
         var cts = _screenCts = new CancellationTokenSource();
+        bool menuSeen = CloseMenu(); // a menu visible to capture would be read with the game
         try
         {
             var area = GameArea();
@@ -436,7 +450,7 @@ public partial class App : Application, ISettingsHost
             _overlay.ClearLabels();
             _clearTimer?.Stop();
             _notifier.Progress(Loc.Instance["Notice.TranslatingScreen"], area, seconds: 30); // until the result replaces it
-            if (!_overlay.ExcludedFromCapture)
+            if (!_overlay.ExcludedFromCapture || menuSeen)
             {
                 _overlay.Hide();
                 await Task.Delay(80, cts.Token);
@@ -554,22 +568,34 @@ public partial class App : Application, ISettingsHost
     }
 
     /// <summary>The read region and where the translation goes, picked on the screen (see <see cref="RegionSelectWindow"/>).</summary>
+    /// <param name="working">The main window's unsaved settings, when the pick starts there: the picker follows its display mode.</param>
     /// <returns>The read region, or null when the pick was cancelled.</returns>
-    DRect? SelectRegion(RegionPickMode mode = RegionPickMode.Both)
+    DRect? SelectRegion(RegionPickMode mode = RegionPickMode.Both, AppSettings? working = null)
     {
         bool wasRunning = _subtitles?.IsRunning == true;
         StopSubtitles();
-        var read = _settings.Subtitles.Region?.ToRectangle();
+        var from = working ?? _settings;
+        var read = from.Subtitles.Region?.ToRectangle();
         // Only the display box: the picker opens on the read region's monitor; else on the one under the mouse.
         var screen = mode == RegionPickMode.DisplayOnly && read is { } r ? Forms.Screen.FromRectangle(r) : Forms.Screen.FromPoint(Forms.Cursor.Position);
-        var dialog = new RegionSelectWindow(screen, mode, read, SettingsStore.Clone(_settings).Overlay, _ocr is null ? null : ReadPreviewAsync);
+        var dialog = new RegionSelectWindow(screen, mode, read, SettingsStore.Clone(from).Overlay, _ocr is null ? null : ReadPreviewAsync);
         // Started from the main window, which would cover the game where the subtitles are: it steps aside while the
         // user drags and comes back after. Started in the game (the hotkey) it is left as it is: bringing it back
         // would take the focus from the game, and the subtitles would start paused.
         var main = _mainWindow is { IsActive: true } active ? active : null;
         var mainState = main?.WindowState;
         if (main is not null) main.WindowState = WindowState.Minimized;
-        bool picked = dialog.ShowDialog() == true;
+        CloseMenu();
+        bool picked;
+        _picking = true; // hotkeys still arrive in the dialog's loop: the menu stays shut meanwhile
+        try
+        {
+            picked = dialog.ShowDialog() == true;
+        }
+        finally
+        {
+            _picking = false;
+        }
         if (main is not null && mainState is { } state)
         {
             main.WindowState = state;
@@ -591,11 +617,14 @@ public partial class App : Application, ISettingsHost
             look.BackgroundOpacity = Math.Round(display.BackgroundOpacity, 2);
             look.TextOutline = display.TextOutline;
         }
+        // A new read region picked onto the translation's box, in Shared mode: the box moves off it.
+        var fix = KeepTranslationOffRead();
         TrySaveSettings();
         SettingsChanged?.Invoke(this, EventArgs.Empty);
         _presenter?.Restyle();
-        if (!WarnIfLargeRegion(rect))
-            _notifier.Feedback(NoticeCategory.Status, Loc.Instance[pick.Display is null ? "Notice.RegionSaved" : "Notice.RegionsSaved"], rect);
+        string saved = Loc.Instance[pick.Display is null ? "Notice.RegionSaved" : "Notice.RegionsSaved"];
+        if (fix != PlacementFix.None) saved += "\n" + RegionRules.NoticeFor(fix);
+        if (!WarnIfLargeRegion(rect)) _notifier.Feedback(NoticeCategory.Status, saved, rect);
         if (wasRunning) StartSubtitles(restart: true);
         return rect;
     }
@@ -633,16 +662,27 @@ public partial class App : Application, ISettingsHost
     {
         var look = _settings.Overlay;
         look.DisplayMode = look.DisplayMode == DisplayMode.Shared ? DisplayMode.Private : DisplayMode.Shared;
+        // Shared: a translation placed on the read region moves off it (the app's own OCR would read it).
+        var fix = KeepTranslationOffRead();
         TrySaveSettings();
         ApplyDisplayMode();
         SettingsChanged?.Invoke(this, EventArgs.Empty);
         StateChanged?.Invoke(this, EventArgs.Empty);
         bool shared = look.DisplayMode == DisplayMode.Shared;
         string text = Loc.Instance[shared ? "Notice.ModeShared" : "Notice.ModePrivate"];
-        if (shared && look.Share.Subtitles && _settings.Subtitles.Region is { } region
-            && SubtitlePlacement.Covers(look.Position, look.DisplayRegion?.ToRectangle(), region.ToRectangle()))
-            text += "\n" + Loc.Instance["Notice.ModeSharedMoved"];
+        if (fix != PlacementFix.None) text += "\n" + RegionRules.NoticeFor(fix);
         _notifier.Feedback(NoticeCategory.Status, text, _subtitles?.Region ?? GameArea(), shared ? StatusKind.On : StatusKind.Info);
+    }
+
+    /// <summary>The settings in use follow the Shared-mode rule (see <see cref="RegionRules.Enforce"/>); saving is the caller's.</summary>
+    PlacementFix KeepTranslationOffRead() => KeepTranslationOffRead(_settings);
+
+    static PlacementFix KeepTranslationOffRead(AppSettings settings)
+    {
+        if (settings.Subtitles.Region is not { } read) return PlacementFix.None;
+        var fix = RegionRules.Enforce(settings.Overlay, read, Forms.Screen.FromRectangle(read.ToRectangle()).Bounds);
+        if (fix != PlacementFix.None) Log.Write($"regions: the translation covered the read region in Shared mode: {fix}");
+        return fix;
     }
 
     /// <summary>The overlay windows screen sharing sees, and the lines placed again for it.</summary>
@@ -675,6 +715,7 @@ public partial class App : Application, ISettingsHost
     void ShowMainWindow(bool welcome = false)
     {
         if (UpdateBlocks()) return;
+        CloseMenu();
         if (_mainWindow is { } open)
         {
             if (open.WindowState == WindowState.Minimized) open.WindowState = WindowState.Normal;
@@ -738,6 +779,9 @@ public partial class App : Application, ISettingsHost
 
     SaveResult ISettingsHost.Save(AppSettings settings, SettingsChange changes)
     {
+        // The pages keep the Shared-mode rule as the user edits; this catches what a merge with the app's own changes
+        // could bring together (a region picked by hotkey meanwhile).
+        if (KeepTranslationOffRead(settings) != PlacementFix.None) changes |= SettingsChange.Overlay;
         try
         {
             _store.Save(settings);
@@ -766,6 +810,7 @@ public partial class App : Application, ISettingsHost
         if (redo.RestartSubtitles) StopSubtitles();
         if (redo.RebuildOcr) problems.AddRange(BuildOcr());
         if (redo.RebuildProviders) problems.AddRange(ApplyProviders());
+        if (redo.RegisterHotkeys) CloseMenu(); // its gestures may have changed
         if (redo.RegisterHotkeys && RegisterHotkeys() is { } hotkeyProblem) problems.Add(hotkeyProblem);
         if (redo.Restyle) ApplyDisplayMode();
         if (_mainWindow is not null) ApplyMainWindowCapture(_mainWindow, _settings.General.HideMainWindowFromCapture);
@@ -789,7 +834,7 @@ public partial class App : Application, ISettingsHost
         var chain = _providers.BuildDetached(settings.Translation);
         string src = LangCodes.FromOcrTag(_ocr?.LanguageTag);
         string tgt = string.IsNullOrWhiteSpace(settings.General.TargetLanguage) ? "en" : settings.General.TargetLanguage;
-        var profile = _profiles.Resolve(settings.Translation.ProfileId, "witcher3", src, tgt); // the sample is a Witcher line
+        var profile = _profiles.Resolve(settings.Translation.ProfileId, null, src, tgt); // the sample is no game's line: only a profile picked by name applies
         var result = await Task.Run(() => chain.Translator.TranslateAsync(new TranslateRequest([line], src, tgt, [], profile), ct), ct);
         return new TestTranslation(result.Texts[0], result.ProviderAt(0) ?? chain.Translator.Name, chain.Notice);
     }
@@ -812,6 +857,8 @@ public partial class App : Application, ISettingsHost
     void ISettingsHost.SelectRegion() => SelectRegion();
 
     void ISettingsHost.SelectRegions(RegionPickMode mode) => SelectRegion(mode);
+
+    void ISettingsHost.SelectRegions(RegionPickMode mode, AppSettings working) => SelectRegion(mode, working);
 
     async Task<ReadPreview?> ISettingsHost.TestReadingAsync(RegionSettings region, CancellationToken ct)
     {
@@ -902,14 +949,18 @@ public partial class App : Application, ISettingsHost
     [
         new(Loc.Instance["Overlay.Sample1"], false, Original: "Wind's howling."),
         new(Loc.Instance["Overlay.Sample2"], false, Original: "We should find shelter before nightfall."),
-        new(Loc.Instance["Overlay.Sample3"], false, Original: "Roach is tired, and so am I."),
+        new(Loc.Instance["Overlay.Sample3"], false, Original: "The road is long, and I am tired."),
     ];
 
     // ---- hotkeys (the Hotkeys page and the wizard) ----
 
     public event EventHandler<HotkeyAction>? HotkeyPressed;
 
-    void ISettingsHost.SuspendHotkeys() => _hotkeys?.Suspend();
+    void ISettingsHost.SuspendHotkeys()
+    {
+        CloseMenu(); // a recorder takes the keys, the menu's too
+        _hotkeys?.Suspend();
+    }
 
     void ISettingsHost.ResumeHotkeys()
     {
@@ -973,6 +1024,7 @@ public partial class App : Application, ISettingsHost
     /// <summary>A new copy (a restart, an update) needs the hotkeys and the single-instance mutex: this one lets go of them before starting it.</summary>
     void ReleaseInstance()
     {
+        CloseMenu();
         _hotkeys?.Dispose();
         _hotkeys = null;
         _singleInstance?.ReleaseMutex();
@@ -1026,8 +1078,22 @@ public partial class App : Application, ISettingsHost
     (string Src, string Tgt) ISettingsHost.Languages => Langs();
     void ISettingsHost.ShowFix(string source, string translation) => _presenter?.ApplyFix(source, translation);
 
+    void ISettingsHost.RemoveHistory(int id)
+    {
+        _presenter?.RemoveRecord(id);
+        StateChanged?.Invoke(this, EventArgs.Empty); // Home counts the lines
+    }
+
+    void ISettingsHost.ClearHistory()
+    {
+        _presenter?.ClearHistory();
+        Log.Write("history: cleared");
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     void OnExit(object sender, ExitEventArgs e)
     {
+        CloseMenu(); // saves a font size still waiting
         _subtitles?.Dispose();
         _providers.Flush();
         _hotkeys?.Dispose();
